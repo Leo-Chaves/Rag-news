@@ -29,6 +29,11 @@
         <p v-else class="bubble-text">{{ message.content }}</p>
       </div>
 
+      <!-- Resposta priorizou os temas do perfil -->
+      <span v-if="message.personalizado" class="personal-tag" title="As notícias dos seus temas de interesse foram priorizadas nesta resposta">
+        ★ Priorizando seus temas
+      </span>
+
       <!-- Sources -->
       <div v-if="message.sources && message.sources.length" class="sources">
         <span class="sources-label">Fontes:</span>
@@ -52,7 +57,7 @@ defineProps({
   message: {
     type: Object,
     required: true,
-    // shape: { id, role: 'user'|'assistant', content, sources?, isLoading? }
+    // shape: { id, role: 'user'|'assistant', content, sources?, personalizado?, isLoading? }
   },
 });
 
@@ -178,6 +183,18 @@ function formatSource(url) {
     transform: translateY(-6px);
     opacity: 1;
   }
+}
+
+/* Personalização */
+.personal-tag {
+  align-self: flex-start;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: 99px;
+  padding: 1px 8px;
 }
 
 /* Sources */

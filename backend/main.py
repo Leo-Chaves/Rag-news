@@ -6,10 +6,10 @@ from pathlib import Path
 # pyrefly: ignore [missing-import]
 import feedparser
 import psycopg
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, TypedDict, Literal
+from typing import List, Optional, TypedDict, Literal
 # pyrefly: ignore [missing-import]
 from langgraph.graph import StateGraph, START, END
 from dotenv import load_dotenv
@@ -26,6 +26,10 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 # pyrefly: ignore [missing-import]
 from langchain_core.output_parsers import StrOutputParser
+
+from auth import AuthUser, auth_configured, get_current_user, get_optional_user
+from preferences import get_user_topics, set_user_topics
+from topics import RSS_FEEDS, TOPICS, expand_topics, normalize_topics
 
 
 def _load_dotenv_safe():
@@ -86,16 +90,13 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# BBC RSS Feeds (fixos no backend)
+# BBC RSS Feeds: definidos em topics.py (RSS_FEEDS), cada um com seu tema
 # ---------------------------------------------------------------------------
 
-BBC_RSS_URLS: List[str] = [
-    "http://feeds.bbci.co.uk/news/rss.xml",
-    "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "http://feeds.bbci.co.uk/news/technology/rss.xml",
-    "http://feeds.bbci.co.uk/news/business/rss.xml",
-    "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-]
+# Bônus somado ao score de similaridade das notícias dos temas preferidos.
+# Os scores do MiniLM em buscas PT->EN costumam ficar entre ~0.05 e ~0.5,
+# então 0.1 reordena sem esconder notícias muito mais relevantes de outros temas.
+PREFERENCE_BOOST = float(os.getenv("PREFERENCE_BOOST", "0.1"))
 
 # ---------------------------------------------------------------------------
 # Shared resources
@@ -197,6 +198,12 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: List[str] = []
+    # True quando a busca foi reordenada pelos temas preferidos do usuário
+    personalizado: bool = False
+
+
+class PreferencesBody(BaseModel):
+    topics: List[str]
 
 
 # ---------------------------------------------------------------------------
@@ -212,10 +219,8 @@ def _get_existing_sources() -> set:
     if not DATABASE_URL:
         return set()
 
-    # psycopg3 direto usa 'postgresql://' em vez de 'postgresql+psycopg://'
-    conn_str = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
     try:
-        with psycopg.connect(conn_str) as conn:
+        with psycopg.connect(_pg_conn_str()) as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT DISTINCT cmetadata->>'source'
@@ -229,19 +234,21 @@ def _get_existing_sources() -> set:
         return set()
 
 
-def _fetch_and_chunk_rss(urls: List[str], existing_sources: set | None = None):
+def _fetch_and_chunk_rss(feeds: List[tuple[str, str]], existing_sources: set | None = None):
     """
     Busca artigos dos feeds RSS e retorna (chunks, metadatas).
+    `feeds` é uma lista de (url, categoria); a categoria vai para a metadata.
     Artigos cujo link já está em existing_sources são ignorados.
     """
-    if existing_sources is None:
-        existing_sources = set()
+    # Cópia: o set também é usado para não repetir a mesma notícia que
+    # aparece em mais de um feed na mesma execução.
+    existing_sources = set(existing_sources or ())
 
     all_docs: List[str] = []
     metadata_list: List[dict] = []
     skipped = 0
 
-    for url in urls:
+    for url, category in feeds:
         feed = feedparser.parse(url)
         if feed.bozo and not feed.entries:
             continue
@@ -256,12 +263,13 @@ def _fetch_and_chunk_rss(urls: List[str], existing_sources: set | None = None):
             if link in existing_sources:
                 skipped += 1
                 continue
+            existing_sources.add(link)
 
             content = f"Título: {title}\n\nResumo: {summary}"
             if content.strip():
                 all_docs.append(content)
                 metadata_list.append(
-                    {"source": link, "title": title, "published": published}
+                    {"source": link, "title": title, "published": published, "category": category}
                 )
 
     if skipped:
@@ -304,14 +312,14 @@ def ingest():
     logger.info("Fontes já existentes no banco: %d", len(existing))
 
     chunks, chunk_metadata, total_articles, skipped = _fetch_and_chunk_rss(
-        BBC_RSS_URLS, existing_sources=existing
+        RSS_FEEDS, existing_sources=existing
     )
 
     if not chunks:
         if skipped > 0:
             return {
                 "message": "Todas as notícias já estão atualizadas no banco.",
-                "feeds_processados": len(BBC_RSS_URLS),
+                "feeds_processados": len(RSS_FEEDS),
                 "articles_processed": 0,
                 "chunks_stored": 0,
                 "skipped": skipped,
@@ -326,7 +334,7 @@ def ingest():
 
     return {
         "message": "Ingestão dos feeds da BBC concluída com sucesso.",
-        "feeds_processados": len(BBC_RSS_URLS),
+        "feeds_processados": len(RSS_FEEDS),
         "articles_processed": total_articles,
         "chunks_stored": len(chunks),
         "skipped": skipped,
@@ -337,26 +345,47 @@ def ingest():
 # Grafo RAG com LangGraph
 # ---------------------------------------------------------------------------
 
-class EstadoRAG(TypedDict):
+class EstadoRAG(TypedDict, total=False):
     pergunta: str
     top_k: int
+    temas_preferidos: List[str]  # já expandidos (pai + subtemas); vazio = anônimo/sem preferência
+    candidatos: list              # [(doc, score)] vindos do PGVector
     documentos_recuperados: list
     score_maximo: float
+    personalizado: bool
     contexto: str
     resposta: str
 
 def no_recuperar(estado: EstadoRAG):
     vs = get_vector_store()
-    docs_scores = vs.similarity_search_with_relevance_scores(estado["pergunta"], k=estado["top_k"])
-    
-    if docs_scores:
-        score_max = max(score for doc, score in docs_scores)
-        docs = [doc for doc, score in docs_scores]
-    else:
-        score_max = 0.0
-        docs = []
-        
-    return {"documentos_recuperados": docs, "score_maximo": score_max}
+    # Com preferências, buscamos mais candidatos para o nó "personalizar"
+    # ter de onde promover notícias dos temas favoritos.
+    k = estado["top_k"] * 3 if estado.get("temas_preferidos") else estado["top_k"]
+    docs_scores = vs.similarity_search_with_relevance_scores(estado["pergunta"], k=k)
+
+    # O score máximo é o BRUTO (sem bônus): a decisão de evidência não pode
+    # ser influenciada pela preferência, senão perguntas sem resposta passariam.
+    score_max = max((score for _, score in docs_scores), default=0.0)
+    return {"candidatos": docs_scores, "score_maximo": score_max}
+
+def no_personalizar(estado: EstadoRAG):
+    """
+    Reordena os candidatos somando PREFERENCE_BOOST aos que pertencem aos
+    temas preferidos e mantém os top_k. Não filtra: uma pergunta sobre um tema
+    fora das preferências continua sendo respondida.
+    """
+    temas = set(estado.get("temas_preferidos") or [])
+    candidatos = estado.get("candidatos") or []
+
+    def score_ajustado(item):
+        doc, score = item
+        bonus = PREFERENCE_BOOST if doc.metadata.get("category") in temas else 0.0
+        return score + bonus
+
+    ordenados = sorted(candidatos, key=score_ajustado, reverse=True) if temas else candidatos
+    docs = [doc for doc, _ in ordenados[: estado["top_k"]]]
+    personalizado = bool(temas) and any(d.metadata.get("category") in temas for d in docs)
+    return {"documentos_recuperados": docs, "personalizado": personalizado}
 
 def no_montar_contexto(estado: EstadoRAG):
     docs = estado["documentos_recuperados"]
@@ -399,6 +428,7 @@ def decidir_evidencia(estado: EstadoRAG) -> Literal["com_evidencia", "sem_eviden
 
 grafo = StateGraph(EstadoRAG)
 grafo.add_node("recuperar", no_recuperar)
+grafo.add_node("personalizar", no_personalizar)
 grafo.add_node("montar_contexto", no_montar_contexto)
 grafo.add_node("gerar_resposta", no_gerar_resposta)
 grafo.add_node("sem_evidencia", no_sem_evidencia)
@@ -408,31 +438,80 @@ grafo.add_conditional_edges(
     "recuperar",
     decidir_evidencia,
     {
-        "com_evidencia": "montar_contexto",
+        "com_evidencia": "personalizar",
         "sem_evidencia": "sem_evidencia"
     }
 )
+grafo.add_edge("personalizar", "montar_contexto")
 grafo.add_edge("montar_contexto", "gerar_resposta")
 grafo.add_edge("gerar_resposta", END)
 grafo.add_edge("sem_evidencia", END)
 
 grafo_rag = grafo.compile()
 
+def _pg_conn_str() -> str:
+    """psycopg puro usa 'postgresql://' em vez de 'postgresql+psycopg://'."""
+    return DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+
+
 @app.post("/chat", response_model=ChatResponse, tags=["Chat"])
-def chat(body: ChatRequest):
+def chat(body: ChatRequest, user: Optional[AuthUser] = Depends(get_optional_user)):
     """
     Recebe uma pergunta, usa LangGraph para buscar contexto
     com verificação condicional e retorna a resposta.
+    Se o usuário estiver logado, as notícias dos temas preferidos são priorizadas.
     """
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY nao configurada.")
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="Banco nao configurado. Defina DB_HOST e DB_PASSWORD no .env.")
 
+    temas: List[str] = []
+    if user:
+        try:
+            temas = sorted(expand_topics(get_user_topics(_pg_conn_str(), user.id)))
+        except Exception as exc:
+            # Falha ao ler preferências não deve derrubar o chat
+            logger.warning("Não foi possível carregar preferências: %s", exc)
+
     # Invoca o grafo
-    resultado = grafo_rag.invoke({"pergunta": body.question, "top_k": 5})
-    
+    resultado = grafo_rag.invoke({"pergunta": body.question, "top_k": 5, "temas_preferidos": temas})
+
     docs = resultado.get("documentos_recuperados", [])
-    sources = list({doc.metadata.get("source", "") for doc in docs if doc.metadata.get("source")})
-    
-    return ChatResponse(answer=resultado["resposta"], sources=sources)
+    sources = list(dict.fromkeys(doc.metadata.get("source") for doc in docs if doc.metadata.get("source")))
+
+    return ChatResponse(
+        answer=resultado["resposta"],
+        sources=sources,
+        personalizado=resultado.get("personalizado", False),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Perfil / preferências de tema
+# ---------------------------------------------------------------------------
+
+@app.get("/topics", tags=["Perfil"])
+def list_topics():
+    """Temas disponíveis para o usuário escolher (hierárquicos via `parent`)."""
+    return {"topics": TOPICS, "auth_enabled": auth_configured()}
+
+
+@app.get("/me/preferences", tags=["Perfil"])
+def read_preferences(user: AuthUser = Depends(get_current_user)):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="Banco não configurado.")
+    return {"topics": get_user_topics(_pg_conn_str(), user.id)}
+
+
+@app.put("/me/preferences", tags=["Perfil"])
+def update_preferences(body: PreferencesBody, user: AuthUser = Depends(get_current_user)):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="Banco não configurado.")
+    if len(body.topics) > 50:
+        raise HTTPException(status_code=422, detail="Lista de temas muito grande.")
+    try:
+        topics = normalize_topics(body.topics)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"topics": set_user_topics(_pg_conn_str(), user.id, topics)}

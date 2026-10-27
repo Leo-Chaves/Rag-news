@@ -37,6 +37,16 @@
       </div>
     </transition>
 
+    <!-- Login / cadastro / recuperação de senha -->
+    <AuthModal :open="authModalOpen" :initial-mode="authModalMode" @close="authModalOpen = false" />
+
+    <!-- Perfil e temas de interesse -->
+    <ProfileModal
+      :open="profileModalOpen"
+      :onboarding="profileOnboarding"
+      @close="closeProfile"
+    />
+
     <!-- Main chat area -->
     <main class="chat-main">
       <!-- Header -->
@@ -52,6 +62,31 @@
           <h1 class="header-title">Chat com Notícias</h1>
         </div>
         <div class="header-actions">
+          <!-- Login / menu do usuário -->
+          <template v-if="authEnabled && authReady">
+            <button v-if="!user" class="login-btn" @click="openAuth('login')">Entrar</button>
+            <div v-else ref="userMenuRef" class="user-menu">
+              <button
+                class="avatar-btn"
+                :title="displayName"
+                :aria-expanded="userMenuOpen"
+                @click="userMenuOpen = !userMenuOpen"
+              >
+                {{ userInitial }}
+              </button>
+              <transition name="fade">
+                <div v-if="userMenuOpen" class="user-dropdown">
+                  <div class="user-dropdown-head">
+                    <strong>{{ displayName }}</strong>
+                    <span>{{ user.email }}</span>
+                  </div>
+                  <button @click="openProfile()">Meu perfil e temas</button>
+                  <button class="danger" @click="handleSignOut">Sair</button>
+                </div>
+              </transition>
+            </div>
+          </template>
+
           <button class="icon-btn" :title="isDarkMode ? 'Modo Claro' : 'Modo Escuro'" @click="toggleTheme">
             <svg v-if="!isDarkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
@@ -91,6 +126,18 @@
           <h2 class="empty-title">Como posso ajudar?</h2>
           <p class="empty-sub">
             Faça uma pergunta sobre as notícias ingeridas ou use o menu para acessar as <strong>Perguntas Rápidas</strong>.
+          </p>
+          <p v-if="user && selectedNames.length" class="prefs-hint">
+            Priorizando notícias de: <strong>{{ selectedNames.join(", ") }}</strong> ·
+            <button class="inline-link" @click="openProfile()">editar</button>
+          </p>
+          <p v-else-if="user" class="prefs-hint">
+            <button class="inline-link" @click="openProfile()">Escolha seus temas de interesse</button>
+            para personalizar as respostas.
+          </p>
+          <p v-else-if="authEnabled" class="prefs-hint">
+            <button class="inline-link" @click="openAuth('signup')">Crie uma conta</button>
+            para receber respostas priorizando os assuntos que você mais gosta.
           </p>
         </div>
 
@@ -145,10 +192,92 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from "vue";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 import axios from "axios";
 import ChatSidebar from "./components/ChatSidebar.vue";
 import ChatMessage from "./components/ChatMessage.vue";
+import AuthModal from "./components/AuthModal.vue";
+import ProfileModal from "./components/ProfileModal.vue";
+import { useAuth } from "./composables/useAuth";
+import { usePreferences } from "./composables/usePreferences";
+
+// ─── Login / perfil ───────────────────────────────────────────────────────────
+
+const {
+  authEnabled,
+  ready: authReady,
+  user,
+  displayName,
+  recoveringPassword,
+  signOut,
+} = useAuth();
+const { selected, selectedNames, loadPreferences, clearPreferences } = usePreferences();
+
+const authModalOpen = ref(false);
+const authModalMode = ref("login");
+const profileModalOpen = ref(false);
+const profileOnboarding = ref(false);
+const userMenuOpen = ref(false);
+const userMenuRef = ref(null);
+
+const userInitial = computed(() => (displayName.value || "?").charAt(0).toUpperCase());
+const ONBOARDING_KEY = (id) => `topics_onboarding_seen_${id}`;
+
+function openAuth(mode) {
+  authModalMode.value = mode;
+  authModalOpen.value = true;
+}
+
+function openProfile(onboarding = false) {
+  userMenuOpen.value = false;
+  profileOnboarding.value = onboarding;
+  profileModalOpen.value = true;
+}
+
+function closeProfile() {
+  profileModalOpen.value = false;
+  if (profileOnboarding.value && user.value) {
+    localStorage.setItem(ONBOARDING_KEY(user.value.id), "true");
+  }
+  profileOnboarding.value = false;
+}
+
+async function handleSignOut() {
+  userMenuOpen.value = false;
+  await signOut();
+}
+
+// Ao entrar: carrega preferências; no primeiro acesso sem temas, abre a escolha.
+// Ao sair: limpa o estado local.
+watch(
+  () => user.value?.id,
+  async (id) => {
+    if (!id) {
+      clearPreferences();
+      return;
+    }
+    try {
+      await loadPreferences();
+      if (!selected.value.length && !localStorage.getItem(ONBOARDING_KEY(id))) {
+        openProfile(true);
+      }
+    } catch (err) {
+      console.warn("Não foi possível carregar as preferências", err);
+    }
+  },
+  { immediate: true }
+);
+
+// Link "esqueci minha senha" do e-mail traz o usuário de volta já logado
+watch(recoveringPassword, (v) => v && openAuth("reset"), { immediate: true });
+
+function onClickOutside(e) {
+  if (userMenuOpen.value && userMenuRef.value && !userMenuRef.value.contains(e.target)) {
+    userMenuOpen.value = false;
+  }
+}
+onMounted(() => document.addEventListener("click", onClickOutside));
+onBeforeUnmount(() => document.removeEventListener("click", onClickOutside));
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -230,15 +359,23 @@ async function sendMessage(text) {
         role: "assistant",
         content: data.answer,
         sources: data.sources || [],
+        personalizado: Boolean(data.personalizado),
         isLoading: false,
       };
     }
   } catch (err) {
     // Remove loading placeholder and show error
     messages.value = messages.value.filter((m) => m.id !== loadingMsg.id);
-    errorMessage.value =
-      "Erro ao obter resposta: " +
-      (err.response?.data?.detail || err.message || "Tente novamente.");
+    if (err.response?.status === 401 && user.value) {
+      // Token recusado pelo backend: encerra a sessão local e pede novo login
+      await signOut();
+      errorMessage.value = "Sua sessão expirou. Entre novamente para manter a personalização.";
+      openAuth("login");
+    } else {
+      errorMessage.value =
+        "Erro ao obter resposta: " +
+        (err.response?.data?.detail || err.message || "Tente novamente.");
+    }
     setTimeout(() => (errorMessage.value = ""), 5000);
   } finally {
     isLoading.value = false;
@@ -461,6 +598,103 @@ function resetTextareaHeight() {
 .icon-btn svg {
   width: 16px;
   height: 16px;
+}
+
+/* ── Login / menu do usuário ─────────────────────────────────────────────── */
+.login-btn {
+  height: 34px;
+  padding: 0 0.9rem;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.login-btn:hover {
+  opacity: 0.9;
+}
+.user-menu {
+  position: relative;
+}
+.avatar-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-accent);
+  color: white;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.user-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 220px;
+  max-width: 280px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 0.35rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+}
+.user-dropdown-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.55rem 0.65rem 0.65rem;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 0.3rem;
+  overflow: hidden;
+}
+.user-dropdown-head strong {
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+}
+.user-dropdown-head span {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-dropdown button {
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.user-dropdown button:hover {
+  background: var(--color-bg-primary);
+}
+.user-dropdown button.danger {
+  color: #ef4444;
+}
+.prefs-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  max-width: 400px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+.inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 /* ── Messages ─────────────────────────────────────────────────────────────── */

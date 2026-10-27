@@ -37,9 +37,9 @@
       <p class="sidebar-section-title">Feeds BBC</p>
 
       <div class="feeds-list">
-        <div v-for="feed in bbcFeeds" :key="feed.label" class="feed-item">
+        <div v-for="feed in feedLabels" :key="feed" class="feed-item">
           <span class="feed-dot" />
-          <span>{{ feed.label }}</span>
+          <span>{{ feed }}</span>
         </div>
       </div>
 
@@ -65,8 +65,9 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import axios from "axios";
+import { usePreferences } from "../composables/usePreferences";
 
 const props = defineProps({
   loading: {
@@ -89,13 +90,16 @@ const quickQuestions = [
   { id: 5, text: "O que aconteceu no futebol hoje?" },
 ];
 
-const bbcFeeds = [
-  { label: "BBC News — Geral" },
-  { label: "BBC News — Mundo" },
-  { label: "BBC News — Tecnologia" },
-  { label: "BBC News — Negócios" },
-  { label: "BBC News — Ciência & Ambiente" },
-];
+// Temas cobertos pelos feeds (vêm do backend em /topics)
+const { parents, childrenOf, loadTopics } = usePreferences();
+onMounted(loadTopics);
+const feedLabels = computed(() => [
+  "Manchetes",
+  ...parents.value.map((t) => {
+    const subs = childrenOf(t.slug).map((c) => c.name);
+    return subs.length ? `${t.name} (${subs.join(", ")})` : t.name;
+  }),
+]);
 
 const isIngesting = ref(false);
 const ingestMessage = ref("");

@@ -28,3 +28,6 @@ feedparser==6.0.11
 
 # Pydantic (FastAPI dependency)
 pydantic==2.7.4
+
+# Autenticação (validação dos tokens do Supabase Auth)
+PyJWT[crypto]==2.10.1

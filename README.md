@@ -103,9 +103,15 @@ sobre outros assuntos continuam funcionando. Sem login, tudo funciona como antes
 - **Personalização no grafo LangGraph:**
 
   ```
-  START → recuperar → (evidência?) ─sim→ personalizar → montar_contexto → gerar_resposta → END
-                                   └não→ sem_evidencia → END
+  START → traduzir → recuperar → (evidência?) ─sim→ personalizar → montar_contexto → gerar_resposta → END
+                                              └não→ sem_evidencia → END
   ```
+
+  `traduzir` reescreve a pergunta em inglês (modelo `TRANSLATE_MODEL`, padrão
+  `openai/gpt-oss-20b`) só para a busca: o modelo de embeddings e as notícias
+  da BBC são em inglês, e perguntas em português traziam notícias de outros
+  temas. A resposta continua usando a pergunta original, em PT-BR. Se a
+  tradução falhar, a busca usa a pergunta original.
 
   Com usuário logado, `recuperar` busca 3× mais candidatos e `personalizar`
   soma `PREFERENCE_BOOST` (padrão 0.1) ao score das notícias dos temas

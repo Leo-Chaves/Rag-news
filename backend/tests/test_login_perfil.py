@@ -33,9 +33,11 @@ def D(cat, src, s):
 
 class FakeVS:
     calls = []
+    queries = []
     results = []
     def similarity_search_with_relevance_scores(self, q, k):
         self.calls.append(k)
+        self.queries.append(q)
         return self.results[:k]
 main._vector_store = FakeVS()
 
@@ -210,6 +212,51 @@ def test_answer_llm_has_max_tokens(monkeypatch):
     FakeVS.results = RESULTS
     assert client.post("/chat", json={"question": "q"}).status_code == 200
     assert seen["max_tokens"] == main.GROQ_MAX_TOKENS <= 1000
+
+
+# ── tradução da pergunta para a busca ──────────────────────────────────────
+def _llms(traducao, resposta="resposta final", seen=None):
+    """ChatGroq falso: o modelo de tradução devolve `traducao` (ou levanta)."""
+    from langchain_core.runnables import RunnableLambda
+    def factory(**kw):
+        if seen is not None: seen.append(kw)
+        if kw["model_name"] == main.TRANSLATE_MODEL:
+            if isinstance(traducao, Exception):
+                def boom(_): raise traducao
+                return RunnableLambda(boom)
+            return FakeListChatModel(responses=[traducao])
+        return FakeListChatModel(responses=[resposta])
+    return factory
+
+def test_search_uses_translated_query_answer_uses_original(monkeypatch):
+    seen = []
+    monkeypatch.setattr(main, "ChatGroq", _llms('"technology news"\nextra', seen=seen))
+    FakeVS.results = RESULTS; FakeVS.queries.clear()
+    r = client.post("/chat", json={"question": "quais as notícias de tecnologia?"}).json()
+    assert FakeVS.queries == ["technology news"]          # aspas e linhas extras removidas
+    assert r["answer"] == "resposta final"
+    tr = next(kw for kw in seen if kw["model_name"] == main.TRANSLATE_MODEL)
+    assert tr["max_tokens"] <= 256 and tr["max_retries"] == 0
+
+def test_translation_failure_falls_back_to_original(monkeypatch):
+    monkeypatch.setattr(main, "ChatGroq", _llms(RuntimeError("groq fora")))
+    FakeVS.results = RESULTS; FakeVS.queries.clear()
+    r = client.post("/chat", json={"question": "pergunta original"})
+    assert r.status_code == 200 and FakeVS.queries == ["pergunta original"]
+
+def test_empty_translation_falls_back_to_original(monkeypatch):
+    monkeypatch.setattr(main, "ChatGroq", _llms("   "))
+    FakeVS.results = RESULTS; FakeVS.queries.clear()
+    client.post("/chat", json={"question": "pergunta original"})
+    assert FakeVS.queries == ["pergunta original"]
+
+def test_translation_can_be_disabled(monkeypatch):
+    seen = []
+    monkeypatch.setattr(main, "TRANSLATE_MODEL", "")
+    monkeypatch.setattr(main, "ChatGroq", _llms("nunca usado", seen=seen))
+    FakeVS.results = RESULTS; FakeVS.queries.clear()
+    client.post("/chat", json={"question": "pergunta original"})
+    assert FakeVS.queries == ["pergunta original"] and len(seen) == 1   # só o LLM da resposta
 
 
 # ── deduplicação contra o banco ─────────────────────────────────────────────

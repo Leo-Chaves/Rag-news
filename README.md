@@ -120,6 +120,9 @@ sobre outros assuntos continuam funcionando. Sem login, tudo funciona como antes
    no banco (as de esporte pela URL; as demais viram "geral"). Para categorizar tudo
    corretamente, apague a collection (comando no próprio arquivo) e clique em
    **Atualizar Notícias**.
+   Depois do primeiro **Atualizar Notícias**, rode também `backend/sql/002_rls_noticias.sql`.
+   Sem ele, as tabelas de notícias ficam abertas para leitura **e escrita** pela API
+   pública do Supabase (a chave anon/publishable fica no frontend).
 2. **Supabase Auth → URL Configuration:** *Site URL* = URL de produção
    (`https://ragnewsbbc.netlify.app`) e, em *Redirect URLs*, adicione também
    `http://localhost:5173`. Isso é usado nos links de confirmação de e-mail e de

@@ -34,18 +34,29 @@ create policy "dono altera suas preferencias"
 -- A alternativa mais limpa é apagar a collection e clicar em "Atualizar Notícias":
 --   delete from langchain_pg_embedding e using langchain_pg_collection c
 --   where e.collection_id = c.uuid and c.name = 'rag_news';
+-- Num banco novo as tabelas do LangChain ainda não existem (são criadas no
+-- primeiro /ingest); nesse caso o bloco abaixo só avisa e não faz nada, em vez
+-- de quebrar o script inteiro (o SQL Editor roda tudo numa transação).
 -- ============================================================================
-update langchain_pg_embedding e
-set cmetadata = e.cmetadata || jsonb_build_object('category',
-    case
-        when e.cmetadata->>'source' like '%/sport/football/%'   then 'futebol'
-        when e.cmetadata->>'source' like '%/sport/tennis/%'     then 'tenis'
-        when e.cmetadata->>'source' like '%/sport/formula1/%'   then 'formula1'
-        when e.cmetadata->>'source' like '%/sport/basketball/%' then 'basquete'
-        when e.cmetadata->>'source' like '%/sport/%'            then 'esportes'
-        else 'geral'
-    end)
-from langchain_pg_collection c
-where e.collection_id = c.uuid
-  and c.name = 'rag_news'
-  and e.cmetadata->>'category' is null;
+do $$
+begin
+    if to_regclass('public.langchain_pg_embedding') is null then
+        raise notice 'Tabelas do LangChain ainda não existem: nada para categorizar.';
+        return;
+    end if;
+    update langchain_pg_embedding e
+    set cmetadata = e.cmetadata || jsonb_build_object('category',
+        case
+            when e.cmetadata->>'source' like '%/sport/football/%'   then 'futebol'
+            when e.cmetadata->>'source' like '%/sport/tennis/%'     then 'tenis'
+            when e.cmetadata->>'source' like '%/sport/formula1/%'   then 'formula1'
+            when e.cmetadata->>'source' like '%/sport/basketball/%' then 'basquete'
+            when e.cmetadata->>'source' like '%/sport/%'            then 'esportes'
+            else 'geral'
+        end)
+    from langchain_pg_collection c
+    where e.collection_id = c.uuid
+      and c.name = 'rag_news'
+      and e.cmetadata->>'category' is null;
+end
+$$;

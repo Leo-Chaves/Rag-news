@@ -35,3 +35,4 @@ def build_rag_graph():
 
 
 grafo_rag = build_rag_graph()
+

@@ -132,3 +132,4 @@ class RagChatService:
         if session is None:
             raise NotFoundError("Sessão de chat não encontrada.")
         ChatRepository.delete_session(db, session)
+

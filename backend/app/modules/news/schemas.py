@@ -105,3 +105,4 @@ class GlobalIngestResponse(BaseModel):
     articles_processed: int
     chunks_stored: int
     skipped: int
+

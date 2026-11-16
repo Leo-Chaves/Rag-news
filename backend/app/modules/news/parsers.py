@@ -243,3 +243,4 @@ def chunk_single_document(
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     parts = splitter.split_text(document)
     return parts, [dict(metadata) for _ in parts]
+

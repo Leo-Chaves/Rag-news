@@ -28,3 +28,4 @@ def get_authenticated_user(
 ) -> UserRead:
     """Valida o token JWT atual e retorna os dados do usuário autenticado."""
     return UserService.get_by_id(db, current_user.id)
+

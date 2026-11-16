@@ -13,3 +13,4 @@ class EstadoRAG(TypedDict, total=False):
     score_maximo: float
     contexto: str
     resposta: str
+

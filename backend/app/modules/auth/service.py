@@ -30,3 +30,4 @@ class AuthService:
             expires_in=expires_in,
             user=user,
         )
+

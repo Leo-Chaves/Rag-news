@@ -79,3 +79,4 @@ def init_db() -> None:
                 )
     except Exception as exc:
         logger.warning("Não foi possível garantir índice GIN em langchain_pg_embedding: %s", exc)
+

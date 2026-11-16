@@ -63,3 +63,4 @@ class ChatSessionWithMessagesRead(ChatSessionRead):
     """Sessão de chat com a lista completa de mensagens."""
 
     messages: list[ChatMessageRead] = []
+

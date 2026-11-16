@@ -80,3 +80,4 @@ class ChatRepository:
     def delete_session(db: Session, session: ChatSession) -> None:
         db.delete(session)
         db.commit()
+

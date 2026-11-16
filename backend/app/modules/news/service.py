@@ -314,3 +314,4 @@ class NewsService:
             metadata_value=str(source.id),
         )
         NewsRepository.delete_source(db, source)
+

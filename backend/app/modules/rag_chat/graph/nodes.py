@@ -127,3 +127,4 @@ def decidir_evidencia(estado: EstadoRAG) -> Literal["com_evidencia", "sem_eviden
     if estado.get("score_maximo", -1.0) >= 0.10 and estado.get("documentos_recuperados"):
         return "com_evidencia"
     return "sem_evidencia"
+

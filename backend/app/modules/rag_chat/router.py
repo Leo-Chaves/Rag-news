@@ -68,3 +68,4 @@ def delete_session(
 ) -> None:
     """Remove uma sessão de chat e todas as suas mensagens."""
     RagChatService.delete_session(db, current_user, session_id)
+

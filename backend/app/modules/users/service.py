@@ -60,3 +60,4 @@ class UserService:
         if changes:
             user = UserRepository.update(db, user, **changes)
         return UserRead.model_validate(user)
+

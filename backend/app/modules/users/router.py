@@ -27,3 +27,4 @@ def update_my_profile(
 ) -> UserRead:
     """Atualiza informações de perfil do usuário autenticado."""
     return UserService.update_user(db, current_user.id, payload)
+

@@ -50,3 +50,4 @@ def generate_chat_completion(
             last_error = exc
 
     raise ExternalServiceError(f"Todos os modelos OpenRouter falharam: {last_error}")
+

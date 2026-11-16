@@ -100,3 +100,4 @@ def delete_custom_source(
 ) -> None:
     """Remove uma fonte personalizada e todos os vetores associados a ela."""
     NewsService.delete_custom_source(db, current_user, source_id)
+

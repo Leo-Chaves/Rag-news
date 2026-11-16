@@ -239,3 +239,4 @@ class NewsRepository:
         except Exception as exc:
             logger.error("Erro ao resetar tabelas: %s", exc)
             raise ExternalServiceError(f"Erro ao resetar banco: {exc}") from exc
+

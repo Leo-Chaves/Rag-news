@@ -33,3 +33,4 @@ class UserUpdate(BaseModel):
 
     name: str | None = None
     picture_url: str | None = None
+

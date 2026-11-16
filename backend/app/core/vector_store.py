@@ -52,3 +52,4 @@ def reset_vector_store_state() -> None:
     global _embeddings, _vector_store
     _embeddings = None
     _vector_store = None
+

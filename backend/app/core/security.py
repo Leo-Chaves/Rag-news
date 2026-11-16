@@ -212,3 +212,4 @@ def verify_google_token(token: str) -> dict[str, str | None]:
         "name": data.get("name"),
         "picture": data.get("picture"),
     }
+

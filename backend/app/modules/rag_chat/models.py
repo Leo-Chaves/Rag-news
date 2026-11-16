@@ -49,3 +49,4 @@ class ChatMessage(Base):
     )
 
     session: Mapped[ChatSession] = relationship(back_populates="messages")
+

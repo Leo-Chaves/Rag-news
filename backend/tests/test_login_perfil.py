@@ -144,11 +144,33 @@ def test_chat_anonymous_unchanged():
     assert r["sources"] == ["p1", "m1", "m2", "n1", "c1"]
 
 def test_chat_personalized_boosts_sports():
+    # esportes quase tão relevantes quanto o topo (>= 85% de .40 = .34): entram por causa do bônus
     DB["fan"] = ["esportes"]
-    FakeVS.results = RESULTS; FakeVS.calls.clear()
+    FakeVS.results = RESULTS[:6] + [D("futebol", "f1", .345), D("tenis", "t1", .342)]; FakeVS.calls.clear()
     r = client.post("/chat", headers=H(token("fan")), json={"question": "q"}).json()
     assert FakeVS.calls == [15] and r["personalizado"] is True
     assert r["sources"][:2] == ["f1", "t1"] and "p1" in r["sources"]   # promove sem filtrar
+
+def test_boost_ignores_preferred_news_far_below_top():
+    # Pergunta sobre outro assunto: futebol bem abaixo do topo (.33/.40 < 85%) não entra
+    DB["fan"] = ["esportes"]
+    FakeVS.results = RESULTS
+    r = client.post("/chat", headers=H(token("fan")), json={"question": "q"}).json()
+    assert r["sources"] == ["p1", "m1", "m2", "n1", "c1"] and r["personalizado"] is False
+
+def test_flag_on_when_preference_only_reorders():
+    # Nada novo entra, mas "mundo" sobe para o topo: isso é priorização
+    DB["mun"] = ["mundo"]
+    FakeVS.results = RESULTS
+    r = client.post("/chat", headers=H(token("mun")), json={"question": "q"}).json()
+    assert r["sources"] == ["m1", "m2", "p1", "n1", "c1"] and r["personalizado"] is True
+
+def test_flag_off_when_preference_changes_nothing():
+    # O tema preferido já estava no top 5 sem bônus: a etiqueta não deve aparecer
+    DB["pol"] = ["politica"]
+    FakeVS.results = RESULTS
+    r = client.post("/chat", headers=H(token("pol")), json={"question": "q"}).json()
+    assert r["sources"] == ["p1", "m1", "m2", "n1", "c1"] and r["personalizado"] is False
 
 def test_boost_does_not_bypass_evidence_threshold():
     DB["fan"] = ["esportes"]

@@ -115,9 +115,13 @@ sobre outros assuntos continuam funcionando. Sem login, tudo funciona como antes
 
   Com usuário logado, `recuperar` busca 3× mais candidatos e `personalizar`
   soma `PREFERENCE_BOOST` (padrão 0.1) ao score das notícias dos temas
-  preferidos antes de escolher os 5 melhores. A decisão de evidência usa o
+  preferidos antes de escolher os 5 melhores. O bônus só vale para notícias com
+  score bruto de pelo menos `PREFERENCE_MIN_RATIO` (padrão 0.85) × o melhor
+  resultado. Assim ele desempata entre notícias igualmente relevantes, sem puxar
+  algo fora do assunto da pergunta. A decisão de evidência usa o
   score **sem** bônus, então a preferência nunca faz uma pergunta sem resposta
-  "passar".
+  "passar". A etiqueta "★ Priorizando seus temas" só aparece quando o bônus
+  mudou as fontes ou a ordem delas.
 
 ### Configuração (uma vez)
 

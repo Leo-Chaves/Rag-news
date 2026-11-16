@@ -98,6 +98,10 @@ app.add_middleware(
 # Os scores do MiniLM em buscas PT->EN costumam ficar entre ~0.05 e ~0.5,
 # então 0.1 reordena sem esconder notícias muito mais relevantes de outros temas.
 PREFERENCE_BOOST = float(os.getenv("PREFERENCE_BOOST", "0.1"))
+# Só recebe o bônus a notícia cujo score BRUTO esteja a pelo menos esta fração
+# do melhor resultado. Sem isso, numa pergunta sobre outro assunto (ex.: IA), um
+# quiz de futebol em 6º lugar subia para o top 5 só por ser do tema preferido.
+PREFERENCE_MIN_RATIO = float(os.getenv("PREFERENCE_MIN_RATIO", "0.85"))
 
 # LLM que escreve a resposta. No plano gratuito do Groq, o qwen aceita só
 # ~1000 tokens de SAÍDA por minuto, e sem max_tokens o Groq reserva uma resposta
@@ -437,19 +441,33 @@ def no_personalizar(estado: EstadoRAG):
     Reordena os candidatos somando PREFERENCE_BOOST aos que pertencem aos
     temas preferidos e mantém os top_k. Não filtra: uma pergunta sobre um tema
     fora das preferências continua sendo respondida.
+
+    O bônus só vale para candidatos com score bruto >= PREFERENCE_MIN_RATIO ×
+    o melhor score, ou seja, desempata entre notícias igualmente relevantes,
+    sem puxar para a resposta algo fora do assunto da pergunta.
+
+    `personalizado` só é True quando a preferência MUDOU o resultado (alguma
+    notícia do tema entrou no top_k ou subiu na ordem, que é a ordem em que o
+    LLM lê o contexto), e não apenas porque uma fonte do tema já apareceria
+    de qualquer forma.
     """
     temas = set(estado.get("temas_preferidos") or [])
-    candidatos = estado.get("candidatos") or []
+    candidatos = sorted(estado.get("candidatos") or [], key=lambda x: x[1], reverse=True)
+    top_k = estado["top_k"]
+    sem_bonus = candidatos[:top_k]
+    if not temas or not candidatos:
+        return {"documentos_recuperados": [d for d, _ in sem_bonus], "personalizado": False}
+
+    piso = max(s for _, s in candidatos) * PREFERENCE_MIN_RATIO
 
     def score_ajustado(item):
         doc, score = item
-        bonus = PREFERENCE_BOOST if doc.metadata.get("category") in temas else 0.0
-        return score + bonus
+        elegivel = doc.metadata.get("category") in temas and score >= piso
+        return score + (PREFERENCE_BOOST if elegivel else 0.0)
 
-    ordenados = sorted(candidatos, key=score_ajustado, reverse=True) if temas else candidatos
-    docs = [doc for doc, _ in ordenados[: estado["top_k"]]]
-    personalizado = bool(temas) and any(d.metadata.get("category") in temas for d in docs)
-    return {"documentos_recuperados": docs, "personalizado": personalizado}
+    com_bonus = sorted(candidatos, key=score_ajustado, reverse=True)[:top_k]
+    personalizado = [id(d) for d, _ in com_bonus] != [id(d) for d, _ in sem_bonus]
+    return {"documentos_recuperados": [d for d, _ in com_bonus], "personalizado": personalizado}
 
 def no_montar_contexto(estado: EstadoRAG):
     docs = estado["documentos_recuperados"]

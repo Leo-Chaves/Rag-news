@@ -12,7 +12,73 @@
       </div>
       <div class="brand-text">
         <span class="brand-title">RAG News</span>
-        <span class="brand-sub">Powered by Groq</span>
+        <span class="brand-sub">OpenRouter · PGVector</span>
+      </div>
+    </div>
+
+    <!-- Nova Conversa -->
+    <button class="new-chat-btn" :disabled="props.loading" @click="$emit('new-chat')">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+      <span>Nova Conversa</span>
+    </button>
+
+    <!-- Biblioteca & Fontes -->
+    <div class="sidebar-section">
+      <p class="sidebar-section-title">Biblioteca & Fontes</p>
+      <div class="nav-list">
+        <button class="nav-item-btn" @click="$emit('open-news-manager', 'feed')">
+          <span>🌐 Explorar Feed BBC</span>
+        </button>
+        <button class="nav-item-btn" @click="$emit('open-news-manager', 'saved')">
+          <span>🔖 Notícias Salvas</span>
+          <span v-if="currentUser" class="count-pill">{{ savedCount }}</span>
+        </button>
+        <button class="nav-item-btn" @click="$emit('open-news-manager', 'sources')">
+          <span>📡 Fontes Personalizadas</span>
+          <span v-if="currentUser" class="count-pill">{{ sourcesCount }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Histórico de Sessões -->
+    <div class="sidebar-section">
+      <p class="sidebar-section-title">Histórico de Conversas</p>
+
+      <div v-if="!currentUser" class="auth-hint-card">
+        <p>Entre com o Google para salvar seu histórico de perguntas e consultar notícias privadas.</p>
+        <button class="auth-hint-btn" @click="$emit('open-auth')">Entrar com Google</button>
+      </div>
+
+      <div v-else-if="sessions.length === 0" class="empty-sessions">
+        Nenhuma conversa salva ainda.
+      </div>
+
+      <div v-else class="sessions-list">
+        <div
+          v-for="session in sessions"
+          :key="session.id"
+          class="session-item"
+          :class="{ active: session.id === activeSessionId }"
+          @click="$emit('select-session', session.id)"
+        >
+          <div class="session-info">
+            <span class="session-title">{{ session.title }}</span>
+            <span class="session-scope">{{ formatScope(session.default_scope) }}</span>
+          </div>
+          <button
+            class="session-delete-btn"
+            title="Excluir conversa"
+            @click.stop="$emit('delete-session', session.id)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14H6L5 6" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -33,8 +99,8 @@
     </div>
 
     <!-- Ingest BBC Feeds -->
-    <div class="sidebar-section">
-      <p class="sidebar-section-title">Feeds BBC</p>
+    <div class="sidebar-section sidebar-footer">
+      <p class="sidebar-section-title">Feeds BBC (Global)</p>
 
       <div class="feeds-list">
         <div v-for="feed in bbcFeeds" :key="feed.label" class="feed-item">
@@ -60,26 +126,31 @@
         {{ ingestMessage }}
       </p>
     </div>
-
   </aside>
 </template>
 
 <script setup>
 import { ref } from "vue";
-import axios from "axios";
+import { newsApi } from "../services/api";
 
 const props = defineProps({
-  loading: {
-    type: Boolean,
-    default: false,
-  },
-  isOpen: {
-    type: Boolean,
-    default: false,
-  },
+  loading: { type: Boolean, default: false },
+  isOpen: { type: Boolean, default: false },
+  currentUser: { type: Object, default: null },
+  sessions: { type: Array, default: () => [] },
+  activeSessionId: { type: String, default: null },
+  savedCount: { type: Number, default: 0 },
+  sourcesCount: { type: Number, default: 0 },
 });
 
-defineEmits(["quick-question"]);
+defineEmits([
+  "quick-question",
+  "new-chat",
+  "select-session",
+  "delete-session",
+  "open-news-manager",
+  "open-auth",
+]);
 
 const quickQuestions = [
   { id: 1, text: "O que aconteceu no recente ataque de drones a Moscou?" },
@@ -101,12 +172,22 @@ const isIngesting = ref(false);
 const ingestMessage = ref("");
 const ingestSuccess = ref(false);
 
+function formatScope(scope) {
+  const map = {
+    global: "Global",
+    saved: "Salvas",
+    custom: "Personalizadas",
+    personal_all: "Acervo Pessoal",
+  };
+  return map[scope] || scope;
+}
+
 async function handleIngest() {
   isIngesting.value = true;
   ingestMessage.value = "";
 
   try {
-    const { data } = await axios.post("/ingest");
+    const data = await newsApi.ingestGlobalFeed();
     ingestSuccess.value = true;
     if (data.chunks_stored === 0 && data.skipped > 0) {
       ingestMessage.value = `✅ Notícias já atualizadas! (${data.skipped} artigos já existiam)`;
@@ -129,13 +210,13 @@ async function handleIngest() {
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 280px;
-  min-width: 280px;
+  width: 290px;
+  min-width: 290px;
   height: 100%;
   background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border);
-  padding: 1.5rem 1rem;
-  gap: 1.5rem;
+  padding: 1.25rem 1rem;
+  gap: 1.15rem;
   overflow-y: auto;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 50;
@@ -146,22 +227,22 @@ async function handleIngest() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding-bottom: 1.25rem;
+  padding-bottom: 1rem;
   border-bottom: 1px solid var(--color-border);
 }
 .brand-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   background: var(--color-accent);
   border-radius: 8px;
   color: white;
 }
 .brand-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
 }
 .brand-text {
   display: flex;
@@ -179,11 +260,36 @@ async function handleIngest() {
   font-weight: 500;
 }
 
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: "Inter", sans-serif;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.new-chat-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+.new-chat-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Sections */
 .sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 .sidebar-section-title {
   font-size: 0.65rem;
@@ -194,23 +300,148 @@ async function handleIngest() {
   margin: 0;
 }
 
+/* Library nav */
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.nav-item-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  font-family: "Inter", sans-serif;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.nav-item-btn:hover {
+  border-color: var(--color-accent);
+}
+.count-pill {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+/* Sessions */
+.auth-hint-card {
+  padding: 0.7rem;
+  border-radius: 8px;
+  border: 1px dashed var(--color-border);
+  background: var(--color-bg-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.auth-hint-card p {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+.auth-hint-btn {
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.42rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.empty-sessions {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  padding: 0.25rem 0;
+}
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 185px;
+  overflow-y: auto;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--color-bg-primary);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.session-item:hover {
+  border-color: var(--color-border);
+}
+.session-item.active {
+  border-color: var(--color-accent);
+  background: var(--color-bg-card);
+}
+.session-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+.session-title {
+  font-size: 0.78rem;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-scope {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+.session-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  flex-shrink: 0;
+}
+.session-delete-btn:hover {
+  color: #f87171;
+}
+.session-delete-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
 /* Quick questions */
 .quick-questions {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 .quick-btn {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   width: 100%;
-  padding: 0.6rem 0.75rem;
+  padding: 0.55rem 0.7rem;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.77rem;
   font-family: "Inter", sans-serif;
   cursor: pointer;
   text-align: left;
@@ -234,14 +465,14 @@ async function handleIngest() {
 .feeds-list {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  margin-bottom: 0.25rem;
+  gap: 0.28rem;
+  margin-bottom: 0.2rem;
 }
 .feed-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   color: var(--color-text-secondary);
 }
 .feed-dot {
@@ -259,12 +490,12 @@ async function handleIngest() {
   justify-content: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.6rem;
+  padding: 0.58rem;
   background: var(--color-accent);
   border: none;
   border-radius: 6px;
   color: white;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
   font-family: "Inter", sans-serif;
   cursor: pointer;
@@ -276,14 +507,13 @@ async function handleIngest() {
 .ingest-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
 }
 .btn-icon {
   width: 14px;
   height: 14px;
 }
 .ingest-message {
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   margin: 0;
   padding: 0.4rem 0.5rem;
   border-radius: 6px;
@@ -311,15 +541,10 @@ async function handleIngest() {
   to { transform: rotate(360deg); }
 }
 
-/* Footer */
 .sidebar-footer {
   margin-top: auto;
-  padding-top: 1rem;
+  padding-top: 0.9rem;
   border-top: 1px solid var(--color-border);
-}
-.sidebar-footer-text {
-  font-size: 0.68rem;
-  color: var(--color-text-muted);
 }
 
 /* Responsive (Off-canvas) */

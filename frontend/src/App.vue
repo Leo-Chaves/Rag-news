@@ -1,7 +1,21 @@
 <template>
   <div class="app-shell">
     <!-- Sidebar -->
-    <ChatSidebar :loading="isLoading" :is-open="isSidebarOpen" @quick-question="handleQuickQuestion" />
+    <ChatSidebar
+      :loading="isLoading"
+      :is-open="isSidebarOpen"
+      :current-user="currentUser"
+      :sessions="chatSessions"
+      :active-session-id="currentSessionId"
+      :saved-count="savedNews.length"
+      :sources-count="customSources.length"
+      @quick-question="handleQuickQuestion"
+      @new-chat="clearChat"
+      @select-session="loadSessionDetail"
+      @delete-session="handleDeleteSession"
+      @open-news-manager="openNewsManager"
+      @open-auth="openAuthModal('')"
+    />
 
     <!-- Mobile Overlay -->
     <transition name="fade">
@@ -13,21 +27,18 @@
       <div v-if="showDisclaimer" class="modal-overlay" @click.self="closeDisclaimer">
         <div class="modal-content">
           <div class="modal-header">
-            <h3>⚠️ Aviso de Limitações Técnicas</h3>
+            <h3>ℹ️ Bem-vindo ao RAG News</h3>
             <button class="close-btn" @click="closeDisclaimer">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
           <div class="modal-body">
             <p>
-              Este projeto está hospedado no plano gratuito do <strong>Render</strong>, que possui um limite estrito de memória RAM (512MB).
+              O sistema utiliza <strong>OpenRouter</strong> (LLM + Embeddings), <strong>LangGraph</strong> e <strong>PGVector</strong> para responder perguntas baseadas exclusivamente nas notícias indexadas.
             </p>
             <p>
-              Para que o sistema funcione sem estourar o limite de memória, tivemos que adotar um <strong>modelo de busca (Embeddings) mais leve e focado no inglês</strong>.
-            </p>
-            <p>
-              <strong>O que isso significa na prática?</strong><br>
-              As pesquisas no banco de dados de notícias terão resultados bem mais precisos e relevantes quando você fizer <strong>perguntas relacionadas às notícias em Inglês</strong>.
+              <strong>Novidades desta versão:</strong><br>
+              Entre com sua conta <strong>Google</strong> para salvar notícias, cadastrar fontes RSS/artigos/tópicos personalizados e escolher o escopo do chat (Global, Salvas, Personalizadas ou Acervo Completo).
             </p>
           </div>
           <div class="modal-footer">
@@ -36,6 +47,31 @@
         </div>
       </div>
     </transition>
+
+    <!-- Google Auth & Profile Modal -->
+    <GoogleAuthModal
+      :is-open="isAuthModalOpen"
+      :user="currentUser"
+      :notice="authNotice"
+      @close="isAuthModalOpen = false"
+      @authenticated="handleAuthenticated"
+      @updated-user="handleUpdatedUser"
+      @logout="handleLogout"
+    />
+
+    <!-- News & Custom Sources Modal -->
+    <NewsManagerModal
+      :is-open="isNewsModalOpen"
+      :initial-tab="activeNewsTab"
+      :current-user="currentUser"
+      :saved-news="savedNews"
+      :custom-sources="customSources"
+      @close="isNewsModalOpen = false"
+      @require-auth="handleRequireAuthFromNews"
+      @refresh-saved="loadSavedNews"
+      @refresh-sources="loadCustomSources"
+      @use-scope="handleUseScope"
+    />
 
     <!-- Main chat area -->
     <main class="chat-main">
@@ -52,6 +88,9 @@
           <h1 class="header-title">Chat com Notícias</h1>
         </div>
         <div class="header-actions">
+          <button class="pill-btn" title="Central de Notícias & Fontes" @click="openNewsManager('feed')">
+            📰 <span class="hide-sm">Acervo</span>
+          </button>
           <button class="icon-btn" :title="isDarkMode ? 'Modo Claro' : 'Modo Escuro'" @click="toggleTheme">
             <svg v-if="!isDarkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
@@ -68,13 +107,34 @@
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
             </svg>
           </button>
-          <button class="icon-btn" title="Limpar conversa" @click="clearChat">
+          <button class="icon-btn" title="Nova conversa" @click="clearChat">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6l-1 14H6L5 6" />
               <path d="M10 11v6M14 11v6" />
               <path d="M9 6V4h6v2" />
             </svg>
+          </button>
+
+          <!-- User / Google Auth trigger -->
+          <button
+            v-if="currentUser"
+            class="user-pill-btn"
+            title="Gerenciar conta Google"
+            @click="openAuthModal('')"
+          >
+            <img
+              v-if="currentUser.picture_url"
+              :src="currentUser.picture_url"
+              :alt="currentUser.name || currentUser.email"
+              class="header-avatar"
+              referrerpolicy="no-referrer"
+            />
+            <span v-else class="header-avatar-fallback">{{ userInitial }}</span>
+            <span class="hide-sm">{{ firstName }}</span>
+          </button>
+          <button v-else class="login-pill-btn" @click="openAuthModal('')">
+            Entrar com Google
           </button>
         </div>
       </header>
@@ -90,17 +150,30 @@
           </div>
           <h2 class="empty-title">Como posso ajudar?</h2>
           <p class="empty-sub">
-            Faça uma pergunta sobre as notícias ingeridas ou use o menu para acessar as <strong>Perguntas Rápidas</strong>.
+            Selecione o escopo abaixo (<strong>Global BBC</strong> ou seu <strong>Acervo Pessoal</strong>) e faça uma pergunta sobre as notícias.
           </p>
         </div>
 
         <!-- Message list -->
         <div class="messages-list">
-          <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
+          <ChatMessage
+            v-for="msg in messages"
+            :key="msg.id"
+            :message="msg"
+            :can-save="Boolean(currentUser)"
+            :saved-urls="savedUrls"
+            @save-source="handleSaveSourceFromMessage"
+          />
         </div>
       </section>
 
-      <!-- Error banner -->
+      <!-- Status / Error banners -->
+      <transition name="fade">
+        <div v-if="statusMessage" class="status-banner">
+          {{ statusMessage }}
+        </div>
+      </transition>
+
       <transition name="fade">
         <div v-if="errorMessage" class="error-banner">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="error-icon">
@@ -114,13 +187,38 @@
 
       <!-- Input area -->
       <footer class="input-area">
+        <!-- Scope selector -->
+        <div class="scope-bar">
+          <button
+            v-for="option in scopeOptions"
+            :key="option.value"
+            type="button"
+            class="scope-chip"
+            :class="{ active: selectedScope === option.value }"
+            @click="selectScope(option.value)"
+          >
+            {{ option.label }}
+          </button>
+
+          <select
+            v-if="selectedScope === 'custom' && customSources.length > 0"
+            v-model="selectedCustomSourceId"
+            class="source-filter-select"
+          >
+            <option :value="null">Todas as fontes personalizadas</option>
+            <option v-for="src in customSources" :key="src.id" :value="src.id">
+              Somente: {{ src.name }}
+            </option>
+          </select>
+        </div>
+
         <div class="input-wrapper">
           <textarea
             id="chat-input"
             ref="inputRef"
             v-model="inputText"
             class="chat-input"
-            placeholder="Pergunte sobre as notícias..."
+            :placeholder="inputPlaceholder"
             rows="1"
             :disabled="isLoading"
             @keydown.enter.prevent="handleEnter"
@@ -145,10 +243,22 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from "vue";
-import axios from "axios";
+import { computed, nextTick, onMounted, ref } from "vue";
 import ChatSidebar from "./components/ChatSidebar.vue";
 import ChatMessage from "./components/ChatMessage.vue";
+import GoogleAuthModal from "./components/GoogleAuthModal.vue";
+import NewsManagerModal from "./components/NewsManagerModal.vue";
+import {
+  authApi,
+  chatApi,
+  clearStoredSession,
+  getStoredToken,
+  getStoredUser,
+  newsApi,
+  onUnauthorized,
+  setStoredSession,
+  setStoredUser,
+} from "./services/api";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -156,6 +266,7 @@ const messages = ref([]);
 const inputText = ref("");
 const isLoading = ref(false);
 const errorMessage = ref("");
+const statusMessage = ref("");
 const messagesContainer = ref(null);
 const inputRef = ref(null);
 
@@ -163,37 +274,238 @@ const isDarkMode = ref(false);
 const isSidebarOpen = ref(false);
 const showDisclaimer = ref(false);
 
-onMounted(() => {
-  const savedTheme = localStorage.getItem('theme');
-  if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    isDarkMode.value = true;
-    document.documentElement.classList.add('dark');
-  }
+const currentUser = ref(getStoredUser());
+const isAuthModalOpen = ref(false);
+const authNotice = ref("");
 
-  // Verifica se o usuário já fechou o aviso anteriormente
-  if (!localStorage.getItem('disclaimer_seen')) {
-    showDisclaimer.value = true;
-  }
+const isNewsModalOpen = ref(false);
+const activeNewsTab = ref("feed");
+
+const selectedScope = ref("global");
+const selectedCustomSourceId = ref(null);
+const currentSessionId = ref(null);
+
+const chatSessions = ref([]);
+const savedNews = ref([]);
+const customSources = ref([]);
+
+const scopeOptions = [
+  { value: "global", label: "🌐 Global (BBC)" },
+  { value: "saved", label: "🔖 Salvas" },
+  { value: "custom", label: "📡 Personalizadas" },
+  { value: "personal_all", label: "✨ Acervo Completo" },
+];
+
+const savedUrls = computed(() => savedNews.value.map((n) => n.url));
+
+const userInitial = computed(() => {
+  const source = currentUser.value?.name || currentUser.value?.email || "U";
+  return source.trim().charAt(0).toUpperCase();
 });
 
-function closeDisclaimer() {
-  showDisclaimer.value = false;
-  localStorage.setItem('disclaimer_seen', 'true');
-}
+const firstName = computed(() => {
+  if (currentUser.value?.name) {
+    return currentUser.value.name.split(" ")[0];
+  }
+  return currentUser.value?.email?.split("@")[0] || "Perfil";
+});
+
+const inputPlaceholder = computed(() => {
+  const map = {
+    global: "Pergunte sobre as notícias globais (BBC)...",
+    saved: "Pergunte sobre as suas notícias salvas...",
+    custom: "Pergunte sobre as suas fontes personalizadas...",
+    personal_all: "Pergunte sobre todo o seu acervo pessoal...",
+  };
+  return map[selectedScope.value] || "Pergunte sobre as notícias...";
+});
 
 let msgCounter = 0;
 const uid = () => ++msgCounter;
 
-// ─── Actions ──────────────────────────────────────────────────────────────────
+// ─── Lifecycle ────────────────────────────────────────────────────────────────
 
-function toggleTheme() {
-  isDarkMode.value = !isDarkMode.value;
-  if (isDarkMode.value) {
-    document.documentElement.classList.add('dark');
-    localStorage.setItem('theme', 'dark');
-  } else {
-    document.documentElement.classList.remove('dark');
-    localStorage.setItem('theme', 'light');
+onMounted(async () => {
+  const savedTheme = localStorage.getItem("theme");
+  if (
+    savedTheme === "dark" ||
+    (!savedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches)
+  ) {
+    isDarkMode.value = true;
+    document.documentElement.classList.add("dark");
+  }
+
+  if (!localStorage.getItem("disclaimer_seen")) {
+    showDisclaimer.value = true;
+  }
+
+  onUnauthorized(() => {
+    currentUser.value = null;
+    chatSessions.value = [];
+    savedNews.value = [];
+    customSources.value = [];
+    currentSessionId.value = null;
+    if (selectedScope.value !== "global") {
+      selectedScope.value = "global";
+      selectedCustomSourceId.value = null;
+    }
+    openAuthModal("Sua sessão expirou. Entre novamente com o Google.");
+  });
+
+  if (getStoredToken()) {
+    try {
+      const me = await authApi.getMe();
+      currentUser.value = me;
+      setStoredUser(me);
+      await loadUserWorkspace();
+    } catch {
+      clearStoredSession();
+      currentUser.value = null;
+    }
+  }
+});
+
+// ─── Auth & User Data ─────────────────────────────────────────────────────────
+
+function openAuthModal(notice = "") {
+  authNotice.value = notice;
+  isAuthModalOpen.value = true;
+  isSidebarOpen.value = false;
+}
+
+function handleRequireAuthFromNews(notice) {
+  isNewsModalOpen.value = false;
+  openAuthModal(notice);
+}
+
+async function handleAuthenticated(tokenResponse) {
+  setStoredSession(tokenResponse.access_token, tokenResponse.user);
+  currentUser.value = tokenResponse.user;
+  isAuthModalOpen.value = false;
+  authNotice.value = "";
+  showStatus("Login com Google realizado com sucesso!");
+  await loadUserWorkspace();
+}
+
+function handleUpdatedUser(updated) {
+  currentUser.value = updated;
+  setStoredUser(updated);
+}
+
+function handleLogout() {
+  clearStoredSession();
+  currentUser.value = null;
+  chatSessions.value = [];
+  savedNews.value = [];
+  customSources.value = [];
+  currentSessionId.value = null;
+  selectedScope.value = "global";
+  selectedCustomSourceId.value = null;
+  showStatus("Você saiu da sua conta.");
+}
+
+async function loadUserWorkspace() {
+  await Promise.all([loadSessions(), loadSavedNews(), loadCustomSources()]);
+}
+
+async function loadSessions() {
+  if (!currentUser.value) return;
+  try {
+    chatSessions.value = await chatApi.getSessions();
+  } catch {
+    chatSessions.value = [];
+  }
+}
+
+async function loadSavedNews() {
+  if (!currentUser.value) return;
+  try {
+    savedNews.value = await newsApi.getSavedNews();
+  } catch {
+    savedNews.value = [];
+  }
+}
+
+async function loadCustomSources() {
+  if (!currentUser.value) return;
+  try {
+    customSources.value = await newsApi.getCustomSources();
+  } catch {
+    customSources.value = [];
+  }
+}
+
+// ─── News Manager & Scope ─────────────────────────────────────────────────────
+
+function openNewsManager(tab = "feed") {
+  activeNewsTab.value = tab;
+  isNewsModalOpen.value = true;
+  isSidebarOpen.value = false;
+}
+
+function selectScope(scope) {
+  if (scope !== "global" && !currentUser.value) {
+    openAuthModal("Entre com o Google para consultar suas notícias salvas ou personalizadas.");
+    return;
+  }
+  selectedScope.value = scope;
+  if (scope !== "custom") {
+    selectedCustomSourceId.value = null;
+  }
+}
+
+function handleUseScope({ scope, customSourceId }) {
+  selectedScope.value = scope;
+  selectedCustomSourceId.value = customSourceId || null;
+  inputRef.value?.focus();
+}
+
+async function handleSaveSourceFromMessage(url) {
+  if (!currentUser.value) {
+    openAuthModal("Entre com o Google para salvar fontes citadas no chat.");
+    return;
+  }
+  try {
+    await newsApi.saveNews({ url, origin: "global_feed" });
+    await loadSavedNews();
+    showStatus("Notícia salva e indexada na sua conta!");
+  } catch (err) {
+    showError(err.response?.data?.detail || "Não foi possível salvar a notícia.");
+  }
+}
+
+// ─── Chat & Sessions ──────────────────────────────────────────────────────────
+
+async function loadSessionDetail(sessionId) {
+  isSidebarOpen.value = false;
+  errorMessage.value = "";
+  try {
+    const detail = await chatApi.getSessionDetail(sessionId);
+    currentSessionId.value = detail.id;
+    selectedScope.value = detail.default_scope || "global";
+    messages.value = (detail.messages || []).map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      sources: m.sources || [],
+      scope: m.role === "assistant" ? detail.default_scope : undefined,
+      isLoading: false,
+    }));
+    await scrollToBottom();
+  } catch (err) {
+    showError(err.response?.data?.detail || "Erro ao carregar histórico da conversa.");
+  }
+}
+
+async function handleDeleteSession(sessionId) {
+  try {
+    await chatApi.deleteSession(sessionId);
+    chatSessions.value = chatSessions.value.filter((s) => s.id !== sessionId);
+    if (currentSessionId.value === sessionId) {
+      clearChat();
+    }
+  } catch (err) {
+    showError(err.response?.data?.detail || "Erro ao excluir conversa.");
   }
 }
 
@@ -206,14 +518,17 @@ async function sendMessage(text) {
   const question = (typeof text === "string" ? text : inputText.value).trim();
   if (!question || isLoading.value) return;
 
+  if (selectedScope.value !== "global" && !currentUser.value) {
+    openAuthModal("Entre com o Google para consultar este escopo.");
+    return;
+  }
+
   errorMessage.value = "";
   inputText.value = "";
   resetTextareaHeight();
 
-  // Push user message
   messages.value.push({ id: uid(), role: "user", content: question });
 
-  // Push loading placeholder for assistant
   const loadingMsg = { id: uid(), role: "assistant", content: "", isLoading: true };
   messages.value.push(loadingMsg);
   await scrollToBottom();
@@ -221,8 +536,18 @@ async function sendMessage(text) {
   isLoading.value = true;
 
   try {
-    const { data } = await axios.post("/chat", { question });
-    // Replace loading placeholder with real answer
+    const data = await chatApi.ask({
+      question,
+      scope: selectedScope.value,
+      session_id: currentSessionId.value,
+      custom_source_id:
+        selectedScope.value === "custom" ? selectedCustomSourceId.value : null,
+    });
+
+    if (data.session_id) {
+      currentSessionId.value = data.session_id;
+    }
+
     const idx = messages.value.findIndex((m) => m.id === loadingMsg.id);
     if (idx !== -1) {
       messages.value[idx] = {
@@ -230,16 +555,20 @@ async function sendMessage(text) {
         role: "assistant",
         content: data.answer,
         sources: data.sources || [],
+        scope: data.scope || selectedScope.value,
         isLoading: false,
       };
     }
+
+    if (currentUser.value) {
+      await loadSessions();
+    }
   } catch (err) {
-    // Remove loading placeholder and show error
     messages.value = messages.value.filter((m) => m.id !== loadingMsg.id);
-    errorMessage.value =
+    showError(
       "Erro ao obter resposta: " +
-      (err.response?.data?.detail || err.message || "Tente novamente.");
-    setTimeout(() => (errorMessage.value = ""), 5000);
+        (err.response?.data?.detail || err.message || "Tente novamente.")
+    );
   } finally {
     isLoading.value = false;
     await scrollToBottom();
@@ -249,12 +578,44 @@ async function sendMessage(text) {
 
 function clearChat() {
   messages.value = [];
+  currentSessionId.value = null;
   errorMessage.value = "";
+  isSidebarOpen.value = false;
+}
+
+function closeDisclaimer() {
+  showDisclaimer.value = false;
+  localStorage.setItem("disclaimer_seen", "true");
+}
+
+function toggleTheme() {
+  isDarkMode.value = !isDarkMode.value;
+  if (isDarkMode.value) {
+    document.documentElement.classList.add("dark");
+    localStorage.setItem("theme", "dark");
+  } else {
+    document.documentElement.classList.remove("dark");
+    localStorage.setItem("theme", "light");
+  }
 }
 
 function handleEnter(event) {
-  if (event.shiftKey) return; // allow newline
+  if (event.shiftKey) return;
   sendMessage(inputText.value);
+}
+
+function showStatus(msg) {
+  statusMessage.value = msg;
+  setTimeout(() => {
+    if (statusMessage.value === msg) statusMessage.value = "";
+  }, 4000);
+}
+
+function showError(msg) {
+  errorMessage.value = msg;
+  setTimeout(() => {
+    if (errorMessage.value === msg) errorMessage.value = "";
+  }, 5000);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -404,10 +765,11 @@ function resetTextareaHeight() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.5rem;
+  padding: 0.85rem 1.5rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   flex-shrink: 0;
+  gap: 0.75rem;
 }
 .header-info {
   display: flex;
@@ -415,7 +777,7 @@ function resetTextareaHeight() {
   gap: 0.75rem;
 }
 .icon-btn.mobile-menu-btn {
-  display: none; /* hidden on desktop */
+  display: none;
 }
 .header-title {
   margin: 0;
@@ -423,17 +785,6 @@ function resetTextareaHeight() {
   font-weight: 700;
   color: var(--color-text-primary);
   letter-spacing: -0.02em;
-}
-.header-badge {
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-card);
-  padding: 2px 8px;
-  border-radius: 99px;
-  border: 1px solid var(--color-border);
 }
 .header-actions {
   display: flex;
@@ -461,6 +812,53 @@ function resetTextareaHeight() {
 .icon-btn svg {
   width: 16px;
   height: 16px;
+}
+
+.pill-btn,
+.user-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 34px;
+  padding: 0 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.pill-btn:hover,
+.user-pill-btn:hover {
+  border-color: var(--color-accent);
+}
+.login-pill-btn {
+  height: 34px;
+  padding: 0 0.85rem;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-accent);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.header-avatar,
+.header-avatar-fallback {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.header-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent);
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 /* ── Messages ─────────────────────────────────────────────────────────────── */
@@ -517,11 +915,21 @@ function resetTextareaHeight() {
 .empty-sub {
   margin: 0;
   font-size: 0.85rem;
-  max-width: 360px;
+  max-width: 400px;
   line-height: 1.6;
 }
 
-/* ── Error banner ─────────────────────────────────────────────────────────── */
+/* ── Banners ──────────────────────────────────────────────────────────────── */
+.status-banner {
+  margin: 0 1.5rem 0.5rem;
+  padding: 0.55rem 1rem;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 8px;
+  color: #4ade80;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
 .error-banner {
   display: flex;
   align-items: center;
@@ -551,11 +959,49 @@ function resetTextareaHeight() {
 
 /* ── Input area ───────────────────────────────────────────────────────────── */
 .input-area {
-  padding: 1rem 1.5rem 1.25rem;
+  padding: 0.75rem 1.5rem 1.15rem;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   flex-shrink: 0;
 }
+.scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+.scope-chip {
+  padding: 0.32rem 0.7rem;
+  border-radius: 99px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.scope-chip:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+.scope-chip.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+  font-weight: 600;
+}
+.source-filter-select {
+  padding: 0.3rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: 0.76rem;
+  outline: none;
+}
+
 .input-wrapper {
   display: flex;
   align-items: center;
@@ -609,7 +1055,6 @@ function resetTextareaHeight() {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  transform: none;
 }
 .send-btn svg {
   width: 18px;
@@ -643,8 +1088,8 @@ function resetTextareaHeight() {
   .icon-btn.mobile-menu-btn {
     display: flex;
   }
-  .header-badge {
-    display: none; /* Hide badge on very small screens to save space */
+  .hide-sm {
+    display: none;
   }
   .chat-header {
     padding: 0.8rem 1rem;

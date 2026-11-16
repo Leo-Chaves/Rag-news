@@ -22,6 +22,9 @@
     <!-- Bubble -->
     <div class="bubble-wrapper">
       <div class="bubble" :class="message.role">
+        <div v-if="message.role === 'assistant' && message.scope && !message.isLoading" class="scope-tag">
+          Escopo: {{ formatScope(message.scope) }}
+        </div>
         <!-- Typing indicator for loading AI messages -->
         <div v-if="message.isLoading" class="typing-dots">
           <span /><span /><span />
@@ -32,29 +35,54 @@
       <!-- Sources -->
       <div v-if="message.sources && message.sources.length" class="sources">
         <span class="sources-label">Fontes:</span>
-        <a
-          v-for="src in message.sources"
-          :key="src"
-          :href="src"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="source-link"
-        >
-          {{ formatSource(src) }}
-        </a>
+        <div v-for="src in message.sources" :key="src" class="source-chip">
+          <a
+            :href="src"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="source-link"
+          >
+            {{ formatSource(src) }}
+          </a>
+          <button
+            v-if="canSave"
+            type="button"
+            class="save-source-btn"
+            :class="{ saved: isSaved(src) }"
+            :disabled="isSaved(src)"
+            :title="isSaved(src) ? 'Já salva na sua conta' : 'Salvar notícia na conta'"
+            @click="$emit('save-source', src)"
+          >
+            {{ isSaved(src) ? "✓ Salva" : "🔖 Salvar" }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-defineProps({
+const props = defineProps({
   message: {
     type: Object,
     required: true,
-    // shape: { id, role: 'user'|'assistant', content, sources?, isLoading? }
+    // shape: { id, role: 'user'|'assistant', content, sources?, scope?, isLoading? }
+  },
+  canSave: {
+    type: Boolean,
+    default: false,
+  },
+  savedUrls: {
+    type: Array,
+    default: () => [],
   },
 });
+
+defineEmits(["save-source"]);
+
+function isSaved(url) {
+  return props.savedUrls.includes(url);
+}
 
 function formatSource(url) {
   try {
@@ -62,6 +90,16 @@ function formatSource(url) {
   } catch {
     return url;
   }
+}
+
+function formatScope(scope) {
+  const map = {
+    global: "Global (BBC)",
+    saved: "Notícias Salvas",
+    custom: "Fontes Personalizadas",
+    personal_all: "Acervo Pessoal",
+  };
+  return map[scope] || scope;
 }
 </script>
 
@@ -141,6 +179,14 @@ function formatSource(url) {
   border-bottom-left-radius: 4px;
   color: var(--color-text-primary);
 }
+.scope-tag {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--color-accent-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+}
 .bubble-text {
   margin: 0;
   white-space: pre-wrap;
@@ -160,15 +206,9 @@ function formatSource(url) {
   border-radius: 50%;
   animation: bounce 1.2s infinite ease-in-out;
 }
-.typing-dots span:nth-child(1) {
-  animation-delay: 0s;
-}
-.typing-dots span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-.typing-dots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
+.typing-dots span:nth-child(1) { animation-delay: 0s; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes bounce {
   0%, 80%, 100% {
     transform: translateY(0);
@@ -184,21 +224,43 @@ function formatSource(url) {
 .sources {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.4rem;
   align-items: center;
 }
 .sources-label {
   font-size: 0.7rem;
   color: var(--color-text-muted);
 }
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
 .source-link {
   font-size: 0.7rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-decoration: none;
   transition: color 0.15s;
 }
 .source-link:hover {
   color: var(--color-text-primary);
   text-decoration: underline;
+}
+.save-source-btn {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  padding: 0 0 0 0.3rem;
+  font-size: 0.66rem;
+  color: var(--color-accent-light);
+  cursor: pointer;
+}
+.save-source-btn.saved {
+  color: #4ade80;
+  cursor: default;
 }
 </style>

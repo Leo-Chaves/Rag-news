@@ -13,6 +13,10 @@ export default defineConfig({
     proxy: {
       '/chat': 'http://localhost:8000',
       '/ingest': 'http://localhost:8000',
+      '/reset': 'http://localhost:8000',
+      '/auth': 'http://localhost:8000',
+      '/users': 'http://localhost:8000',
+      '/news': 'http://localhost:8000',
     },
   },
 })

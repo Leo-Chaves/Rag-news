@@ -1,24 +1,16 @@
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, verify_google_token
-from app.modules.auth.schemas import TokenResponse
-from app.modules.users.schemas import GoogleUserUpsertDTO
+from app.core.security import create_access_token, hash_password
+from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse
+from app.modules.users.schemas import UserCreateDTO, UserRead
 from app.modules.users.service import UserService
 
 
 class AuthService:
-    """Orquestra a validação do token Google e a emissão da sessão JWT."""
+    """Orquestra cadastro, login por credenciais e emissão da sessão JWT."""
 
     @staticmethod
-    def authenticate_with_google(db: Session, raw_token: str) -> TokenResponse:
-        google_info = verify_google_token(raw_token)
-        upsert_dto = GoogleUserUpsertDTO(
-            google_sub=str(google_info["sub"]),
-            email=str(google_info["email"]),
-            name=google_info.get("name"),
-            picture_url=google_info.get("picture"),
-        )
-        user = UserService.get_or_create_google_user(db, upsert_dto)
+    def _issue_token_response(user: UserRead) -> TokenResponse:
         access_token, expires_in = create_access_token(
             user_id=str(user.id),
             email=user.email,
@@ -31,3 +23,17 @@ class AuthService:
             user=user,
         )
 
+    @staticmethod
+    def register(db: Session, payload: RegisterRequest) -> TokenResponse:
+        dto = UserCreateDTO(
+            email=payload.email,
+            password_hash=hash_password(payload.password),
+            name=payload.name,
+        )
+        user = UserService.register_user(db, dto)
+        return AuthService._issue_token_response(user)
+
+    @staticmethod
+    def login(db: Session, payload: LoginRequest) -> TokenResponse:
+        user = UserService.verify_credentials(db, payload.email, payload.password)
+        return AuthService._issue_token_response(user)

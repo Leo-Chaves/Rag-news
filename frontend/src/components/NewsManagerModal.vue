@@ -102,9 +102,9 @@
           <!-- TAB 2: NOTÍCIAS SALVAS -->
           <div v-else-if="activeTab === 'saved'" class="tab-panel">
             <div v-if="!currentUser" class="auth-gate">
-              <p>Entre com sua conta Google para salvar notícias e consultar seu acervo privado no chat.</p>
-              <button class="primary-btn" @click="$emit('require-auth', 'Faça login com o Google para gerenciar suas notícias salvas.')">
-                Entrar com Google
+              <p>Entre na sua conta para salvar notícias e consultar seu acervo privado no chat.</p>
+              <button class="primary-btn" @click="$emit('require-auth', 'Faça login para gerenciar suas notícias salvas.')">
+                Entrar
               </button>
             </div>
 
@@ -168,9 +168,9 @@
           <!-- TAB 3: FONTES PERSONALIZADAS -->
           <div v-else-if="activeTab === 'sources'" class="tab-panel">
             <div v-if="!currentUser" class="auth-gate">
-              <p>Entre com sua conta Google para cadastrar feeds RSS, artigos diretos ou tópicos de interesse.</p>
-              <button class="primary-btn" @click="$emit('require-auth', 'Faça login com o Google para gerenciar fontes personalizadas.')">
-                Entrar com Google
+              <p>Entre na sua conta para cadastrar feeds RSS, artigos diretos ou tópicos de interesse.</p>
+              <button class="primary-btn" @click="$emit('require-auth', 'Faça login para gerenciar fontes personalizadas.')">
+                Entrar
               </button>
             </div>
 
@@ -369,7 +369,7 @@ async function handleIngestGlobal() {
 
 async function saveFromFeed(item) {
   if (!props.currentUser) {
-    emit("require-auth", "Faça login com o Google para salvar notícias na sua conta.");
+    emit("require-auth", "Faça login para salvar notícias na sua conta.");
     return;
   }
   savingUrl.value = item.url;

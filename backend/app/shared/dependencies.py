@@ -52,7 +52,7 @@ def get_current_user(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Autenticação obrigatória. Faça login via Google OAuth.",
+            detail="Autenticação obrigatória. Faça login para continuar.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user

@@ -6,7 +6,7 @@
   </div>
 
   <!-- Tela obrigatória de login antes de acessar o sistema -->
-  <GoogleAuthModal
+  <AuthModal
     v-else-if="!currentUser"
     :is-open="true"
     mode="screen"
@@ -54,7 +54,7 @@
             </p>
             <p>
               <strong>Novidades desta versão:</strong><br>
-              Entre com sua conta <strong>Google</strong> para salvar notícias, cadastrar fontes RSS/artigos/tópicos personalizados e escolher o escopo do chat (Global, Salvas, Personalizadas ou Acervo Completo).
+              Crie sua conta ou faça login para salvar notícias, cadastrar fontes RSS/artigos/tópicos personalizados e escolher o escopo do chat (Global, Salvas, Personalizadas ou Acervo Completo).
             </p>
           </div>
           <div class="modal-footer">
@@ -64,8 +64,8 @@
       </div>
     </transition>
 
-    <!-- Google Profile Modal -->
-    <GoogleAuthModal
+    <!-- Profile Modal -->
+    <AuthModal
       :is-open="isAuthModalOpen"
       mode="modal"
       :user="currentUser"
@@ -134,11 +134,11 @@
             </svg>
           </button>
 
-          <!-- User / Google Auth trigger -->
+          <!-- User profile trigger -->
           <button
             v-if="currentUser"
             class="user-pill-btn"
-            title="Gerenciar conta Google"
+            title="Gerenciar minha conta"
             @click="openAuthModal('')"
           >
             <img
@@ -152,7 +152,7 @@
             <span class="hide-sm">{{ firstName }}</span>
           </button>
           <button v-else class="login-pill-btn" @click="openAuthModal('')">
-            Entrar com Google
+            Entrar
           </button>
         </div>
       </header>
@@ -264,7 +264,7 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import ChatSidebar from "./components/ChatSidebar.vue";
 import ChatMessage from "./components/ChatMessage.vue";
-import GoogleAuthModal from "./components/GoogleAuthModal.vue";
+import AuthModal from "./components/AuthModal.vue";
 import NewsManagerModal from "./components/NewsManagerModal.vue";
 import {
   authApi,
@@ -368,7 +368,7 @@ onMounted(async () => {
     messages.value = [];
     selectedScope.value = "global";
     selectedCustomSourceId.value = null;
-    authNotice.value = "Sua sessão expirou. Entre novamente com o Google.";
+    authNotice.value = "Sua sessão expirou. Entre novamente para continuar.";
   });
 
   if (getStoredToken()) {
@@ -410,7 +410,7 @@ async function handleAuthenticated(tokenResponse) {
   currentUser.value = tokenResponse.user;
   isAuthModalOpen.value = false;
   authNotice.value = "";
-  showStatus("Login com Google realizado com sucesso!");
+  showStatus("Login realizado com sucesso!");
   await loadUserWorkspace();
 }
 
@@ -473,7 +473,7 @@ function openNewsManager(tab = "feed") {
 
 function selectScope(scope) {
   if (scope !== "global" && !currentUser.value) {
-    openAuthModal("Entre com o Google para consultar suas notícias salvas ou personalizadas.");
+    openAuthModal("Entre na sua conta para consultar suas notícias salvas ou personalizadas.");
     return;
   }
   selectedScope.value = scope;
@@ -490,7 +490,7 @@ function handleUseScope({ scope, customSourceId }) {
 
 async function handleSaveSourceFromMessage(url) {
   if (!currentUser.value) {
-    openAuthModal("Entre com o Google para salvar fontes citadas no chat.");
+    openAuthModal("Entre na sua conta para salvar fontes citadas no chat.");
     return;
   }
   try {
@@ -547,7 +547,7 @@ async function sendMessage(text) {
   if (!question || isLoading.value) return;
 
   if (selectedScope.value !== "global" && !currentUser.value) {
-    openAuthModal("Entre com o Google para consultar este escopo.");
+    openAuthModal("Entre na sua conta para consultar este escopo.");
     return;
   }
 

@@ -73,7 +73,7 @@ class Settings:
     """Configurações centrais da aplicação carregadas do ambiente."""
 
     APP_TITLE: str = "RAG News API"
-    APP_DESCRIPTION: str = "API de RAG para notícias (Monólito Modular) com OpenRouter, PGVector e Google OAuth"
+    APP_DESCRIPTION: str = "API de RAG para notícias (Monólito Modular) com OpenRouter, PGVector e JWT"
     APP_VERSION: str = "3.0.0"
 
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
@@ -102,7 +102,6 @@ class Settings:
 
     DATABASE_URL: str = _build_database_url()
 
-    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256").strip() or "HS256"
     JWT_EXPIRE_MINUTES: int = _parse_int_env("JWT_EXPIRE_MINUTES", 1440)
 

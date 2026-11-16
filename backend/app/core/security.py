@@ -3,15 +3,17 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import httpx
-
 from app.core.config import settings
-from app.core.exceptions import ExternalServiceError, UnauthorizedError
+from app.core.exceptions import UnauthorizedError
 
 logger = logging.getLogger(__name__)
+
+_PBKDF2_ALGORITHM = "pbkdf2_sha256"
+_PBKDF2_ITERATIONS = 210_000
 
 try:
     import jwt as _pyjwt  # type: ignore[import-not-found]
@@ -26,6 +28,42 @@ def _b64url_encode(data: bytes) -> str:
 def _b64url_decode(data: str) -> bytes:
     padding = "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode(data + padding)
+
+
+def hash_password(password: str) -> str:
+    """Gera hash seguro da senha usando PBKDF2-HMAC-SHA256 com salt aleatório."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        _PBKDF2_ITERATIONS,
+    )
+    return f"{_PBKDF2_ALGORITHM}${_PBKDF2_ITERATIONS}${_b64url_encode(salt)}${_b64url_encode(digest)}"
+
+
+def verify_password(plain_password: str, stored_hash: str) -> bool:
+    """Verifica se a senha informada corresponde ao hash armazenado em tempo constante."""
+    if not plain_password or not stored_hash:
+        return False
+
+    try:
+        algorithm, iter_str, salt_b64, hash_b64 = stored_hash.split("$", 3)
+        if algorithm != _PBKDF2_ALGORITHM:
+            return False
+        iterations = int(iter_str)
+        salt = _b64url_decode(salt_b64)
+        expected_digest = _b64url_decode(hash_b64)
+    except (ValueError, TypeError):
+        return False
+
+    candidate_digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        plain_password.encode("utf-8"),
+        salt,
+        iterations,
+    )
+    return hmac.compare_digest(candidate_digest, expected_digest)
 
 
 def create_access_token(
@@ -122,94 +160,3 @@ def decode_access_token(token: str) -> dict[str, Any]:
         raise UnauthorizedError("Token JWT expirado.")
 
     return payload
-
-
-def _verify_google_id_token(token: str) -> dict[str, Any]:
-    """Valida um Google ID Token usando google-auth ou endpoint tokeninfo."""
-    try:
-        from google.auth.transport import requests as google_requests  # type: ignore[import-not-found]
-        from google.oauth2 import id_token as google_id_token  # type: ignore[import-not-found]
-
-        audience = settings.GOOGLE_CLIENT_ID or None
-        info = google_id_token.verify_oauth2_token(
-            token,
-            google_requests.Request(),
-            audience=audience,
-        )
-        iss = info.get("iss")
-        if iss not in ("accounts.google.com", "https://accounts.google.com"):
-            raise UnauthorizedError("Emissor do token Google inválido.")
-        return dict(info)
-    except ImportError:
-        pass
-    except UnauthorizedError:
-        raise
-    except Exception as exc:
-        raise UnauthorizedError(f"Google ID Token inválido: {exc}") from exc
-
-    try:
-        resp = httpx.get(
-            "https://oauth2.googleapis.com/tokeninfo",
-            params={"id_token": token},
-            timeout=10.0,
-        )
-    except httpx.HTTPError as exc:
-        raise ExternalServiceError(f"Falha ao contatar Google OAuth: {exc}") from exc
-
-    if resp.status_code != 200:
-        raise UnauthorizedError("Google ID Token inválido ou expirado.")
-
-    data = resp.json()
-    if settings.GOOGLE_CLIENT_ID and data.get("aud") != settings.GOOGLE_CLIENT_ID:
-        raise UnauthorizedError("Google token não pertence ao GOOGLE_CLIENT_ID configurado.")
-
-    return data
-
-
-def _verify_google_access_token(token: str) -> dict[str, Any]:
-    """Valida um Google OAuth2 Access Token via endpoint userinfo."""
-    try:
-        resp = httpx.get(
-            "https://www.googleapis.com/oauth2/v3/userinfo",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10.0,
-        )
-    except httpx.HTTPError as exc:
-        raise ExternalServiceError(f"Falha ao contatar Google OAuth userinfo: {exc}") from exc
-
-    if resp.status_code != 200:
-        raise UnauthorizedError("Google access token inválido ou expirado.")
-
-    return resp.json()
-
-
-def verify_google_token(token: str) -> dict[str, str | None]:
-    """
-    Valida um token Google OAuth 2.0 (ID Token JWT ou Access Token) e retorna
-    os campos normalizados: sub, email, name e picture.
-    """
-    clean_token = (token or "").strip()
-    if not clean_token:
-        raise UnauthorizedError("Token do Google não informado.")
-
-    if len(clean_token.split(".")) == 3:
-        data = _verify_google_id_token(clean_token)
-    else:
-        data = _verify_google_access_token(clean_token)
-
-    email_verified = data.get("email_verified")
-    if email_verified in (False, "false", "False"):
-        raise UnauthorizedError("E-mail da conta Google ainda não foi verificado.")
-
-    sub = data.get("sub")
-    email = data.get("email")
-    if not sub or not email:
-        raise UnauthorizedError("Token Google não contém identificador (sub) e e-mail válidos.")
-
-    return {
-        "sub": str(sub),
-        "email": str(email),
-        "name": data.get("name"),
-        "picture": data.get("picture"),
-    }
-

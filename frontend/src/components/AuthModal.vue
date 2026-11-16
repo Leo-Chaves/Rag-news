@@ -40,9 +40,9 @@
               </svg>
             </div>
             <div class="modal-title-wrap">
-              <h3>{{ user ? "Minha Conta Google" : "Entrar no RAG News" }}</h3>
+              <h3>{{ user ? "Minha Conta" : isRegister ? "Criar Conta no RAG News" : "Entrar no RAG News" }}</h3>
               <span class="modal-sub">
-                {{ user ? "Sessão autenticada via JWT" : "Login obrigatório · Google OAuth 2.0" }}
+                {{ user ? "Sessão autenticada via JWT" : "Acesse com seu e-mail e senha" }}
               </span>
             </div>
           </div>
@@ -66,72 +66,104 @@
             {{ successMsg }}
           </div>
 
-          <!-- Estado NÃO autenticado -->
+          <!-- Estado NÃO autenticado: Login / Cadastro -->
           <div v-if="!user" class="auth-login-flow">
-            <p class="auth-description">
-              Entre com sua conta Google para acessar o chat de notícias, salvar artigos, cadastrar fontes RSS ou tópicos personalizados e manter seu histórico de conversas.
-            </p>
-
-            <div class="google-actions-box">
-              <!-- Botão principal sempre visível -->
+            <div class="auth-tabs">
               <button
                 type="button"
-                class="google-cta-btn"
-                :disabled="isSubmitting || loadingConfig"
-                @click="handleGoogleButtonClick"
+                class="auth-tab-btn"
+                :class="{ active: !isRegister }"
+                @click="switchMode(false)"
               >
-                <svg class="google-g-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-                  />
-                </svg>
-                <span>
-                  {{
-                    loadingConfig
-                      ? "Carregando Google OAuth..."
-                      : isSubmitting
-                        ? "Conectando ao Google..."
-                        : "Continuar com o Google"
-                  }}
-                </span>
+                Entrar
               </button>
-
-              <!-- Slot oficial GSI (acesso rápido / One Tap fallback) -->
-              <div v-if="activeClientId" ref="googleBtnRef" class="gsi-slot" />
+              <button
+                type="button"
+                class="auth-tab-btn"
+                :class="{ active: isRegister }"
+                @click="switchMode(true)"
+              >
+                Criar conta
+              </button>
             </div>
 
-            <!-- Campo simples exibido apenas quando o usuário clica sem GOOGLE_CLIENT_ID configurado -->
-            <form v-if="showClientConfig" class="client-id-box" @submit.prevent="saveClientIdAndLogin">
-              <label class="field-label">
-                <span>Informe o Google Client ID para continuar</span>
+            <form class="auth-form" @submit.prevent="submitAuth">
+              <label v-if="isRegister" class="field-label">
+                <span>Nome</span>
                 <input
-                  v-model="clientIdDraft"
+                  v-model="nameInput"
                   type="text"
-                  required
                   class="text-input"
-                  placeholder="seu-client-id.apps.googleusercontent.com"
+                  placeholder="Seu nome"
+                  autocomplete="name"
+                  :disabled="isSubmitting"
                 />
               </label>
-              <button type="submit" class="primary-btn" :disabled="!clientIdDraft.trim() || isSubmitting">
-                Confirmar e abrir Google
+
+              <label class="field-label">
+                <span>E-mail</span>
+                <input
+                  v-model="emailInput"
+                  type="email"
+                  required
+                  class="text-input"
+                  placeholder="voce@exemplo.com"
+                  autocomplete="email"
+                  :disabled="isSubmitting"
+                />
+              </label>
+
+              <label class="field-label">
+                <span>Senha</span>
+                <div class="password-wrap">
+                  <input
+                    v-model="passwordInput"
+                    :type="showPassword ? 'text' : 'password'"
+                    required
+                    :minlength="isRegister ? 6 : undefined"
+                    class="text-input password-input"
+                    :placeholder="isRegister ? 'Mínimo 6 caracteres' : 'Sua senha'"
+                    :autocomplete="isRegister ? 'new-password' : 'current-password'"
+                    :disabled="isSubmitting"
+                  />
+                  <button
+                    type="button"
+                    class="toggle-pw-btn"
+                    tabindex="-1"
+                    @click="showPassword = !showPassword"
+                  >
+                    {{ showPassword ? "Ocultar" : "Ver" }}
+                  </button>
+                </div>
+              </label>
+
+              <label v-if="isRegister" class="field-label">
+                <span>Confirmar senha</span>
+                <input
+                  v-model="confirmPasswordInput"
+                  :type="showPassword ? 'text' : 'password'"
+                  required
+                  minlength="6"
+                  class="text-input"
+                  placeholder="Repita a senha"
+                  autocomplete="new-password"
+                  :disabled="isSubmitting"
+                />
+              </label>
+
+              <button type="submit" class="primary-btn full-btn" :disabled="isSubmitting">
+                {{
+                  isSubmitting
+                    ? "Aguarde..."
+                    : isRegister
+                      ? "Criar conta e entrar"
+                      : "Entrar"
+                }}
               </button>
             </form>
           </div>
 
-          <!-- Estado AUTENTICADO -->
+          <!-- Estado AUTENTICADO: Perfil -->
           <div v-else class="profile-flow">
             <div class="profile-card">
               <img
@@ -145,9 +177,8 @@
                 {{ userInitial }}
               </div>
               <div class="profile-meta">
-                <strong>{{ user.name || "Usuário Google" }}</strong>
+                <strong>{{ user.name || "Usuário" }}</strong>
                 <span>{{ user.email }}</span>
-                <small>Google ID: {{ user.google_sub }}</small>
               </div>
             </div>
 
@@ -178,10 +209,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { authApi, usersApi } from "../services/api";
-
-const GOOGLE_CLIENT_ID_KEY = "rag_news_google_client_id";
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -193,245 +222,78 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "authenticated", "updated-user", "logout", "toggle-theme"]);
 
-const googleBtnRef = ref(null);
-const loadingConfig = ref(false);
+const isRegister = ref(false);
+const showPassword = ref(false);
 const isSubmitting = ref(false);
 const errorMsg = ref("");
 const successMsg = ref("");
 
-const activeClientId = ref(
-  (import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim() ||
-    localStorage.getItem(GOOGLE_CLIENT_ID_KEY) ||
-    ""
-);
-const clientIdDraft = ref(activeClientId.value);
-const showClientConfig = ref(false);
+const nameInput = ref("");
+const emailInput = ref("");
+const passwordInput = ref("");
+const confirmPasswordInput = ref("");
 
 const profileName = ref("");
 const profilePicture = ref("");
-
-let gsiPollTimer = null;
-let oneTapTriggeredForSession = false;
 
 const userInitial = computed(() => {
   const source = props.user?.name || props.user?.email || "U";
   return source.trim().charAt(0).toUpperCase();
 });
 
-async function ensureClientIdLoaded() {
-  if (activeClientId.value) return;
-  loadingConfig.value = true;
-  try {
-    const config = await authApi.getConfig();
-    const backendClientId = (config?.google_client_id || "").trim();
-    if (backendClientId) {
-      activeClientId.value = backendClientId;
-      clientIdDraft.value = backendClientId;
-    }
-  } catch {
-    // Caso o backend ainda não tenha GOOGLE_CLIENT_ID, o usuário poderá informar ao clicar no botão
-  } finally {
-    loadingConfig.value = false;
-  }
-}
-
-async function syncStateOnOpen() {
-  errorMsg.value = "";
-  successMsg.value = "";
-
-  if (!props.isOpen) {
-    stopGsiPoll();
-    return;
-  }
-
-  if (props.user) {
-    profileName.value = props.user.name || "";
-    profilePicture.value = props.user.picture_url || "";
-    stopGsiPoll();
-    return;
-  }
-
-  await ensureClientIdLoaded();
-  if (activeClientId.value) {
-    showClientConfig.value = false;
-    await nextTick();
-    initGoogleOneTapAndButton();
-  }
-}
-
-onMounted(() => {
-  if (props.isOpen) {
-    syncStateOnOpen();
-  }
-});
-
 watch(
-  () => [props.isOpen, props.user, activeClientId.value],
-  () => {
-    syncStateOnOpen();
-  }
+  () => [props.isOpen, props.user],
+  ([open, currentUser]) => {
+    errorMsg.value = "";
+    successMsg.value = "";
+    if (open && currentUser) {
+      profileName.value = currentUser.name || "";
+      profilePicture.value = currentUser.picture_url || "";
+    }
+  },
+  { immediate: true }
 );
 
-onBeforeUnmount(() => {
-  stopGsiPoll();
-});
-
-function stopGsiPoll() {
-  if (gsiPollTimer) {
-    clearInterval(gsiPollTimer);
-    gsiPollTimer = null;
-  }
-}
-
-function setupGoogleIdServices() {
-  if (!window.google?.accounts?.id || !activeClientId.value) {
-    return false;
-  }
-
-  window.google.accounts.id.initialize({
-    client_id: activeClientId.value,
-    callback: handleGoogleCredentialResponse,
-    auto_select: true,
-  });
-
-  if (googleBtnRef.value) {
-    googleBtnRef.value.innerHTML = "";
-    window.google.accounts.id.renderButton(googleBtnRef.value, {
-      theme: props.isDarkMode ? "filled_black" : "outline",
-      size: "medium",
-      text: "continue_with",
-      shape: "rectangular",
-      width: 320,
-    });
-  }
-
-  if (!oneTapTriggeredForSession) {
-    oneTapTriggeredForSession = true;
-    try {
-      window.google.accounts.id.prompt();
-    } catch {
-      // Ignora caso o navegador bloqueie o One Tap automático
-    }
-  }
-
-  return true;
-}
-
-function initGoogleOneTapAndButton() {
-  stopGsiPoll();
-  if (setupGoogleIdServices()) return;
-
-  let attempts = 0;
-  gsiPollTimer = setInterval(() => {
-    attempts += 1;
-    if (setupGoogleIdServices() || attempts > 30) {
-      stopGsiPoll();
-    }
-  }, 200);
-}
-
-function waitForGoogleOAuth2(timeoutMs = 5000) {
-  return new Promise((resolve) => {
-    if (window.google?.accounts?.oauth2) {
-      resolve(true);
-      return;
-    }
-    const startedAt = Date.now();
-    const timer = setInterval(() => {
-      if (window.google?.accounts?.oauth2) {
-        clearInterval(timer);
-        resolve(true);
-      } else if (Date.now() - startedAt >= timeoutMs) {
-        clearInterval(timer);
-        resolve(false);
-      }
-    }, 150);
-  });
-}
-
-async function handleGoogleButtonClick() {
-  errorMsg.value = "";
-  if (!activeClientId.value) {
-    await ensureClientIdLoaded();
-  }
-
-  if (!activeClientId.value) {
-    showClientConfig.value = true;
-    errorMsg.value =
-      "Configure o GOOGLE_CLIENT_ID no backend/.env ou informe abaixo para abrir o login do Google.";
-    return;
-  }
-
-  await openGoogleOAuthPopup();
-}
-
-async function openGoogleOAuthPopup() {
-  isSubmitting.value = true;
-  errorMsg.value = "";
-
-  const loaded = await waitForGoogleOAuth2();
-  if (!loaded) {
-    isSubmitting.value = false;
-    errorMsg.value =
-      "Não foi possível carregar o script do Google Identity Services. Verifique sua conexão com a internet.";
-    return;
-  }
-
-  try {
-    const tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: activeClientId.value,
-      scope: "openid email profile",
-      callback: async (tokenResponse) => {
-        if (tokenResponse?.error || !tokenResponse?.access_token) {
-          isSubmitting.value = false;
-          errorMsg.value =
-            tokenResponse?.error_description || "Autenticação com o Google não foi concluída.";
-          return;
-        }
-        await performGoogleLogin(tokenResponse.access_token);
-      },
-      error_callback: () => {
-        isSubmitting.value = false;
-        errorMsg.value = "Janela de login do Google fechada ou bloqueada pelo navegador.";
-      },
-    });
-    tokenClient.requestAccessToken({ prompt: "select_account" });
-  } catch (err) {
-    isSubmitting.value = false;
-    errorMsg.value = err?.message || "Erro ao iniciar login com o Google.";
-  }
-}
-
-async function saveClientIdAndLogin() {
-  const clean = clientIdDraft.value.trim();
-  if (!clean) return;
-  activeClientId.value = clean;
-  localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clean);
-  showClientConfig.value = false;
-  oneTapTriggeredForSession = false;
-  await nextTick();
-  initGoogleOneTapAndButton();
-  await openGoogleOAuthPopup();
-}
-
-async function handleGoogleCredentialResponse(response) {
-  if (!response?.credential) {
-    errorMsg.value = "O Google não retornou uma credencial válida.";
-    return;
-  }
-  await performGoogleLogin(response.credential);
-}
-
-async function performGoogleLogin(token) {
-  isSubmitting.value = true;
+function switchMode(registerMode) {
+  isRegister.value = registerMode;
   errorMsg.value = "";
   successMsg.value = "";
+  passwordInput.value = "";
+  confirmPasswordInput.value = "";
+}
+
+async function submitAuth() {
+  errorMsg.value = "";
+  successMsg.value = "";
+
+  const email = emailInput.value.trim();
+  const password = passwordInput.value;
+
+  if (isRegister.value && password !== confirmPasswordInput.value) {
+    errorMsg.value = "As senhas não coincidem.";
+    return;
+  }
+
+  isSubmitting.value = true;
   try {
-    const data = await authApi.loginWithGoogle(token);
+    const data = isRegister.value
+      ? await authApi.register({
+          name: nameInput.value.trim() || null,
+          email,
+          password,
+        })
+      : await authApi.login({ email, password });
+
+    passwordInput.value = "";
+    confirmPasswordInput.value = "";
     emit("authenticated", data);
   } catch (err) {
-    errorMsg.value =
-      err.response?.data?.detail || err.message || "Falha ao autenticar com o Google.";
+    const detail = err.response?.data?.detail;
+    if (Array.isArray(detail)) {
+      errorMsg.value = detail.map((item) => item.msg).join(" ");
+    } else {
+      errorMsg.value = detail || err.message || "Não foi possível autenticar.";
+    }
   } finally {
     isSubmitting.value = false;
   }
@@ -456,7 +318,6 @@ async function saveProfile() {
 }
 
 function handleLogout() {
-  oneTapTriggeredForSession = false;
   emit("logout");
   emit("close");
 }
@@ -515,13 +376,12 @@ function handleLogout() {
   border: 1px solid var(--color-border);
   border-radius: 14px;
   width: 100%;
-  max-width: 460px;
+  max-width: 440px;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
 
 .screen-card {
-  max-width: 440px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
 }
 
@@ -624,89 +484,85 @@ function handleLogout() {
   color: #4ade80;
 }
 
-.auth-description {
-  margin: 0 0 1.1rem;
-  font-size: 0.87rem;
-  line-height: 1.55;
-  color: var(--color-text-secondary);
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  padding: 0.25rem;
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  margin-bottom: 1rem;
 }
 
-.google-actions-box {
+.auth-tab-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.auth-tab-btn.active {
+  background: var(--color-accent);
+  color: white;
+}
+
+.auth-form,
+.profile-form {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 0.85rem;
 }
 
-.google-cta-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  width: 100%;
-  padding: 0.78rem 1.1rem;
-  border-radius: 10px;
-  border: 1px solid #dadce0;
-  background: #ffffff;
-  color: #1f1f1f;
-  font-size: 0.92rem;
-  font-weight: 600;
-  font-family: "Inter", sans-serif;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  transition: background 0.15s ease, transform 0.1s ease;
-}
-
-.google-cta-btn:hover:not(:disabled) {
-  background: #f8f9fa;
-}
-
-.google-cta-btn:active:not(:disabled) {
-  transform: scale(0.99);
-}
-
-.google-cta-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.google-g-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.gsi-slot {
-  display: flex;
-  justify-content: center;
-  min-height: 0;
-}
-
-.client-id-box {
-  margin-top: 0.75rem;
-  padding: 0.9rem;
-  border-radius: 10px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
+.field-label {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
 }
 
 .text-input {
   width: 100%;
-  padding: 0.55rem 0.75rem;
+  padding: 0.58rem 0.75rem;
   border-radius: 8px;
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   color: var(--color-text-primary);
-  font-size: 0.84rem;
+  font-size: 0.85rem;
   font-family: "Inter", sans-serif;
   outline: none;
 }
 
 .text-input:focus {
   border-color: var(--color-accent);
+}
+
+.password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input {
+  padding-right: 4.2rem;
+}
+
+.toggle-pw-btn {
+  position: absolute;
+  right: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--color-accent-light);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
 }
 
 .profile-card {
@@ -757,25 +613,6 @@ function handleLogout() {
   text-overflow: ellipsis;
 }
 
-.profile-meta small {
-  font-size: 0.68rem;
-  color: var(--color-text-muted);
-}
-
-.profile-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.field-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.78rem;
-  color: var(--color-text-secondary);
-}
-
 .profile-actions {
   display: flex;
   justify-content: space-between;
@@ -787,11 +624,16 @@ function handleLogout() {
   background: var(--color-accent);
   color: white;
   border: none;
-  padding: 0.55rem 1rem;
+  padding: 0.6rem 1rem;
   border-radius: 8px;
-  font-size: 0.84rem;
+  font-size: 0.86rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.full-btn {
+  width: 100%;
+  margin-top: 0.25rem;
 }
 
 .primary-btn:disabled {

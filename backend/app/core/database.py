@@ -65,6 +65,25 @@ def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
 
+    # Migração idempotente caso a tabela users tenha sido criada na versão anterior (Google OAuth)
+    try:
+        with engine.begin() as conn:
+            users_exists = conn.execute(
+                text("SELECT to_regclass('users') IS NOT NULL;")
+            ).scalar()
+            if users_exists:
+                conn.execute(
+                    text(
+                        "ALTER TABLE users "
+                        "ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NOT NULL DEFAULT '';"
+                    )
+                )
+                conn.execute(
+                    text("ALTER TABLE users DROP COLUMN IF EXISTS google_sub;")
+                )
+    except Exception as exc:
+        logger.warning("Não foi possível verificar/migrar colunas da tabela users: %s", exc)
+
     try:
         with engine.begin() as conn:
             table_exists = conn.execute(

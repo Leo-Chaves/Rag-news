@@ -38,7 +38,7 @@ class RagChatService:
         RagChatService._ensure_configured()
 
         if current_user is None:
-            raise UnauthorizedError("Autenticação via Google OAuth é obrigatória.")
+            raise UnauthorizedError("Autenticação é obrigatória.")
 
         session = None
         if payload.session_id is not None:

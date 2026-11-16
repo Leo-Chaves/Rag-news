@@ -17,10 +17,10 @@ faculdade-rag-news/
 │   ├── .env.example
 │   └── app/
 │       ├── main.py           # Factory create_app(), lifespan e registro de routers
-│       ├── core/             # Config, SQLAlchemy, segurança JWT/Google, PGVector, LLM
+│       ├── core/             # Config, SQLAlchemy, segurança JWT/PBKDF2, PGVector, LLM
 │       ├── shared/           # Contratos (DTOs) e dependências de autenticação (get_current_user)
 │       └── modules/          # Domínios isolados
-│           ├── auth/         # Login exclusivo via Google OAuth 2.0 + JWT
+│           ├── auth/         # Cadastro, login por e-mail/senha e emissão de JWT
 │           ├── users/        # Perfil e persistência de usuários
 │           ├── news/         # Feed BBC global, notícias salvas e fontes personalizadas
 │           └── rag_chat/     # Grafo LangGraph isolado por escopo/usuário + histórico
@@ -75,7 +75,8 @@ uvicorn main:app --reload --port 8000
 #### Autenticação & Usuários (`/auth`, `/users`)
 | Método | Rota             | Descrição                                                                 |
 |--------|------------------|---------------------------------------------------------------------------|
-| POST   | `/auth/google`   | Login exclusivo via Google OAuth 2.0 (`credential` / `id_token` / `token`)|
+| POST   | `/auth/register` | Cadastro com nome, e-mail e senha (retorna JWT)                           |
+| POST   | `/auth/login`    | Login com e-mail e senha (retorna JWT)                                    |
 | GET    | `/auth/me`       | Valida JWT e retorna usuário autenticado                                  |
 | GET    | `/users/me`      | Perfil do usuário autenticado                                             |
 | PATCH  | `/users/me`      | Atualiza dados de perfil do usuário autenticado                           |

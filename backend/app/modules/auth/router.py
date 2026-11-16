@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.database import get_db
-from app.modules.auth.schemas import AuthConfigResponse, GoogleAuthRequest, TokenResponse
+from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse
 from app.modules.auth.service import AuthService
 from app.modules.users.schemas import UserRead
 from app.modules.users.service import UserService
@@ -13,19 +12,22 @@ from app.shared.dependencies import get_current_user
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-@router.get("/config", response_model=AuthConfigResponse)
-def get_auth_config() -> AuthConfigResponse:
-    """Retorna o Google Client ID público configurado no backend."""
-    return AuthConfigResponse(google_client_id=settings.GOOGLE_CLIENT_ID)
-
-
-@router.post("/google", response_model=TokenResponse)
-def google_login(
-    payload: GoogleAuthRequest,
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(
+    payload: RegisterRequest,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
-    """Autentica ou registra o usuário exclusivamente via Google OAuth 2.0 e retorna um JWT."""
-    return AuthService.authenticate_with_google(db, payload.resolved_token)
+    """Cadastra uma nova conta com e-mail e senha e retorna o JWT de sessão."""
+    return AuthService.register(db, payload)
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(
+    payload: LoginRequest,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """Autentica o usuário por e-mail e senha e retorna o JWT de sessão."""
+    return AuthService.login(db, payload)
 
 
 @router.get("/me", response_model=UserRead)
@@ -35,4 +37,3 @@ def get_authenticated_user(
 ) -> UserRead:
     """Valida o token JWT atual e retorna os dados do usuário autenticado."""
     return UserService.get_by_id(db, current_user.id)
-

@@ -61,7 +61,9 @@ apiClient.interceptors.response.use(
   (error) => {
     const status = error.response?.status;
     const requestUrl = error.config?.url || "";
-    if (status === 401 && !requestUrl.includes("/auth/google") && getStoredToken()) {
+    const isAuthAttempt =
+      requestUrl.includes("/auth/login") || requestUrl.includes("/auth/register");
+    if (status === 401 && !isAuthAttempt && getStoredToken()) {
       clearStoredSession();
       if (typeof unauthorizedHandler === "function") {
         unauthorizedHandler();
@@ -72,14 +74,18 @@ apiClient.interceptors.response.use(
 );
 
 export const authApi = {
-  async getConfig() {
-    const { data } = await apiClient.get("/auth/config");
+  async register({ name, email, password }) {
+    const { data } = await apiClient.post("/auth/register", {
+      name: name || null,
+      email,
+      password,
+    });
     return data;
   },
-  async loginWithGoogle(token) {
-    const { data } = await apiClient.post("/auth/google", {
-      credential: token,
-      token,
+  async login({ email, password }) {
+    const { data } = await apiClient.post("/auth/login", {
+      email,
+      password,
     });
     return data;
   },

@@ -14,10 +14,6 @@ class UserRepository:
         return db.scalar(select(User).where(User.id == user_id))
 
     @staticmethod
-    def get_by_google_sub(db: Session, google_sub: str) -> User | None:
-        return db.scalar(select(User).where(User.google_sub == google_sub))
-
-    @staticmethod
     def get_by_email(db: Session, email: str) -> User | None:
         return db.scalar(select(User).where(User.email == email))
 
@@ -25,16 +21,14 @@ class UserRepository:
     def create(
         db: Session,
         *,
-        google_sub: str,
         email: str,
+        password_hash: str,
         name: str | None = None,
-        picture_url: str | None = None,
     ) -> User:
         user = User(
-            google_sub=google_sub,
             email=email,
+            password_hash=password_hash,
             name=name,
-            picture_url=picture_url,
         )
         db.add(user)
         db.commit()
@@ -50,4 +44,3 @@ class UserRepository:
         db.commit()
         db.refresh(user)
         return user
-

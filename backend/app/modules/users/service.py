@@ -2,44 +2,39 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
+from app.core.security import verify_password
 from app.modules.users.repository import UserRepository
-from app.modules.users.schemas import GoogleUserUpsertDTO, UserRead, UserUpdate
+from app.modules.users.schemas import UserCreateDTO, UserRead, UserUpdate
 
 
 class UserService:
     """Regras de negócio e fachada pública do módulo de usuários."""
 
     @staticmethod
-    def get_or_create_google_user(db: Session, dto: GoogleUserUpsertDTO) -> UserRead:
-        user = UserRepository.get_by_google_sub(db, dto.google_sub)
-        if user is None:
-            user = UserRepository.get_by_email(db, dto.email)
-
-        if user is not None:
-            if not user.is_active:
-                raise ForbiddenError("Conta de usuário desativada.")
-
-            updates: dict[str, object] = {}
-            if user.google_sub != dto.google_sub:
-                updates["google_sub"] = dto.google_sub
-            if dto.name is not None and user.name != dto.name:
-                updates["name"] = dto.name
-            if dto.picture_url is not None and user.picture_url != dto.picture_url:
-                updates["picture_url"] = dto.picture_url
-
-            if updates:
-                user = UserRepository.update(db, user, **updates)
-            return UserRead.model_validate(user)
+    def register_user(db: Session, dto: UserCreateDTO) -> UserRead:
+        normalized_email = dto.email.strip().lower()
+        existing = UserRepository.get_by_email(db, normalized_email)
+        if existing is not None:
+            raise ConflictError("Já existe uma conta cadastrada com este e-mail.")
 
         created = UserRepository.create(
             db,
-            google_sub=dto.google_sub,
-            email=dto.email,
-            name=dto.name,
-            picture_url=dto.picture_url,
+            email=normalized_email,
+            password_hash=dto.password_hash,
+            name=dto.name.strip() if dto.name else None,
         )
         return UserRead.model_validate(created)
+
+    @staticmethod
+    def verify_credentials(db: Session, email: str, plain_password: str) -> UserRead:
+        normalized_email = (email or "").strip().lower()
+        user = UserRepository.get_by_email(db, normalized_email)
+        if user is None or not verify_password(plain_password, user.password_hash):
+            raise UnauthorizedError("E-mail ou senha inválidos.")
+        if not user.is_active:
+            raise ForbiddenError("Conta de usuário desativada.")
+        return UserRead.model_validate(user)
 
     @staticmethod
     def get_by_id(db: Session, user_id: UUID) -> UserRead:
@@ -60,4 +55,3 @@ class UserService:
         if changes:
             user = UserRepository.update(db, user, **changes)
         return UserRead.model_validate(user)
-

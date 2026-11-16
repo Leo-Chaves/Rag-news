@@ -1,10 +1,8 @@
-from collections.abc import Generator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.modules.rag_chat.schemas import (
     ChatRequest,
@@ -14,29 +12,20 @@ from app.modules.rag_chat.schemas import (
 )
 from app.modules.rag_chat.service import RagChatService
 from app.shared.contracts import CurrentUserDTO
-from app.shared.dependencies import get_current_user, get_optional_user
+from app.shared.dependencies import get_current_user
 
 router = APIRouter(prefix="/chat", tags=["Chat & RAG"])
-
-
-def _get_optional_db() -> Generator[Session | None, None, None]:
-    """Abre sessão apenas se DATABASE_URL estiver configurada (permite erros claros no service)."""
-    if not settings.DATABASE_URL:
-        yield None
-        return
-    yield from get_db()
 
 
 @router.post("", response_model=ChatResponse)
 def chat(
     body: ChatRequest,
-    current_user: CurrentUserDTO | None = Depends(get_optional_user),
-    db: Session | None = Depends(_get_optional_db),
+    current_user: CurrentUserDTO = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> ChatResponse:
     """
-    Recebe uma pergunta e executa o grafo RAG.
-    Escopo 'global' é público (salva histórico se autenticado);
-    escopos 'saved', 'custom' e 'personal_all' exigem autenticação.
+    Recebe uma pergunta autenticada, executa o grafo RAG no escopo escolhido
+    e registra o histórico da sessão do usuário.
     """
     return RagChatService.ask_question(db, body, current_user)
 

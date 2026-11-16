@@ -23,13 +23,16 @@ router = APIRouter(prefix="/news", tags=["News"])
 @router.get("/feed", response_model=list[FeedArticleItem])
 def list_global_feed(
     limit: int = Query(default=30, ge=1, le=100),
+    _current_user: CurrentUserDTO = Depends(get_current_user),
 ) -> list[FeedArticleItem]:
     """Lista artigos recentes dos feeds RSS globais (BBC)."""
     return NewsService.fetch_global_feed_items(limit=limit)
 
 
 @router.post("/ingest", response_model=GlobalIngestResponse)
-def ingest_global_feed() -> GlobalIngestResponse:
+def ingest_global_feed(
+    _current_user: CurrentUserDTO = Depends(get_current_user),
+) -> GlobalIngestResponse:
     """Executa ingestão dos feeds globais da BBC no PGVector."""
     return NewsService.ingest_global_bbc_feeds()
 

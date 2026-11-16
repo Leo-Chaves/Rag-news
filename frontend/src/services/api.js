@@ -72,6 +72,10 @@ apiClient.interceptors.response.use(
 );
 
 export const authApi = {
+  async getConfig() {
+    const { data } = await apiClient.get("/auth/config");
+    return data;
+  },
   async loginWithGoogle(token) {
     const { data } = await apiClient.post("/auth/google", {
       credential: token,
@@ -153,3 +157,4 @@ export const chatApi = {
     await apiClient.delete(`/chat/sessions/${sessionId}`);
   },
 };
+

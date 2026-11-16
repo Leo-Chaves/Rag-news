@@ -34,11 +34,11 @@
         </button>
         <button class="nav-item-btn" @click="$emit('open-news-manager', 'saved')">
           <span>🔖 Notícias Salvas</span>
-          <span v-if="currentUser" class="count-pill">{{ savedCount }}</span>
+          <span class="count-pill">{{ savedCount }}</span>
         </button>
         <button class="nav-item-btn" @click="$emit('open-news-manager', 'sources')">
           <span>📡 Fontes Personalizadas</span>
-          <span v-if="currentUser" class="count-pill">{{ sourcesCount }}</span>
+          <span class="count-pill">{{ sourcesCount }}</span>
         </button>
       </div>
     </div>
@@ -47,12 +47,7 @@
     <div class="sidebar-section">
       <p class="sidebar-section-title">Histórico de Conversas</p>
 
-      <div v-if="!currentUser" class="auth-hint-card">
-        <p>Entre com o Google para salvar seu histórico de perguntas e consultar notícias privadas.</p>
-        <button class="auth-hint-btn" @click="$emit('open-auth')">Entrar com Google</button>
-      </div>
-
-      <div v-else-if="sessions.length === 0" class="empty-sessions">
+      <div v-if="sessions.length === 0" class="empty-sessions">
         Nenhuma conversa salva ainda.
       </div>
 
@@ -136,7 +131,6 @@ import { newsApi } from "../services/api";
 const props = defineProps({
   loading: { type: Boolean, default: false },
   isOpen: { type: Boolean, default: false },
-  currentUser: { type: Object, default: null },
   sessions: { type: Array, default: () => [] },
   activeSessionId: { type: String, default: null },
   savedCount: { type: Number, default: 0 },
@@ -149,7 +143,6 @@ defineEmits([
   "select-session",
   "delete-session",
   "open-news-manager",
-  "open-auth",
 ]);
 
 const quickQuestions = [

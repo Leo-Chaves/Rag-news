@@ -29,3 +29,9 @@ class TokenResponse(BaseModel):
     expires_in: int
     user: UserRead
 
+
+class AuthConfigResponse(BaseModel):
+    """Configurações públicas de autenticação para inicialização do cliente OAuth no frontend."""
+
+    google_client_id: str
+

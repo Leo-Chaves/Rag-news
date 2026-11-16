@@ -31,24 +31,17 @@ class RagChatService:
 
     @staticmethod
     def ask_question(
-        db: Session | None,
+        db: Session,
         payload: ChatRequest,
-        current_user: CurrentUserDTO | None,
+        current_user: CurrentUserDTO,
     ) -> ChatResponse:
         RagChatService._ensure_configured()
 
-        if payload.scope != "global" and current_user is None:
-            raise UnauthorizedError(
-                "Autenticação via Google OAuth é obrigatória para consultar notícias salvas ou personalizadas."
-            )
-
-        if payload.session_id is not None and current_user is None:
-            raise UnauthorizedError(
-                "Autenticação obrigatória para continuar uma sessão de chat existente."
-            )
+        if current_user is None:
+            raise UnauthorizedError("Autenticação via Google OAuth é obrigatória.")
 
         session = None
-        if current_user is not None and db is not None and payload.session_id is not None:
+        if payload.session_id is not None:
             session = ChatRepository.get_session_by_id_and_user(
                 db, payload.session_id, current_user.id
             )
@@ -60,7 +53,7 @@ class RagChatService:
                 "pergunta": payload.question,
                 "top_k": payload.top_k,
                 "scope": payload.scope,
-                "user_id": str(current_user.id) if current_user else None,
+                "user_id": str(current_user.id),
                 "custom_source_id": str(payload.custom_source_id) if payload.custom_source_id else None,
             }
         )
@@ -75,37 +68,34 @@ class RagChatService:
         )
         answer = resultado["resposta"]
 
-        session_id: UUID | None = None
-        if current_user is not None and db is not None:
-            if session is None:
-                title = payload.question[:60]
-                session = ChatRepository.create_session(
-                    db,
-                    user_id=current_user.id,
-                    title=title,
-                    default_scope=payload.scope,
-                )
-            ChatRepository.add_message(
+        if session is None:
+            title = payload.question[:60]
+            session = ChatRepository.create_session(
                 db,
-                session=session,
-                role="user",
-                content=payload.question,
-                sources=[],
+                user_id=current_user.id,
+                title=title,
+                default_scope=payload.scope,
             )
-            ChatRepository.add_message(
-                db,
-                session=session,
-                role="assistant",
-                content=answer,
-                sources=sources,
-            )
-            session_id = session.id
+        ChatRepository.add_message(
+            db,
+            session=session,
+            role="user",
+            content=payload.question,
+            sources=[],
+        )
+        ChatRepository.add_message(
+            db,
+            session=session,
+            role="assistant",
+            content=answer,
+            sources=sources,
+        )
 
         return ChatResponse(
             answer=answer,
             sources=sources,
             scope=payload.scope,
-            session_id=session_id,
+            session_id=session.id,
         )
 
     @staticmethod

@@ -1,10 +1,27 @@
 <template>
-  <div class="app-shell">
+  <!-- Verificando sessão salva -->
+  <div v-if="isCheckingAuth" class="auth-loading-screen">
+    <span class="spinner large" />
+    <p>Verificando sua sessão...</p>
+  </div>
+
+  <!-- Tela obrigatória de login antes de acessar o sistema -->
+  <GoogleAuthModal
+    v-else-if="!currentUser"
+    :is-open="true"
+    mode="screen"
+    :user="null"
+    :notice="authNotice"
+    :is-dark-mode="isDarkMode"
+    @toggle-theme="toggleTheme"
+    @authenticated="handleAuthenticated"
+  />
+
+  <div v-else class="app-shell">
     <!-- Sidebar -->
     <ChatSidebar
       :loading="isLoading"
       :is-open="isSidebarOpen"
-      :current-user="currentUser"
       :sessions="chatSessions"
       :active-session-id="currentSessionId"
       :saved-count="savedNews.length"
@@ -14,7 +31,6 @@
       @select-session="loadSessionDetail"
       @delete-session="handleDeleteSession"
       @open-news-manager="openNewsManager"
-      @open-auth="openAuthModal('')"
     />
 
     <!-- Mobile Overlay -->
@@ -48,11 +64,13 @@
       </div>
     </transition>
 
-    <!-- Google Auth & Profile Modal -->
+    <!-- Google Profile Modal -->
     <GoogleAuthModal
       :is-open="isAuthModalOpen"
+      mode="modal"
       :user="currentUser"
       :notice="authNotice"
+      :is-dark-mode="isDarkMode"
       @close="isAuthModalOpen = false"
       @authenticated="handleAuthenticated"
       @updated-user="handleUpdatedUser"
@@ -274,7 +292,8 @@ const isDarkMode = ref(false);
 const isSidebarOpen = ref(false);
 const showDisclaimer = ref(false);
 
-const currentUser = ref(getStoredUser());
+const currentUser = ref(null);
+const isCheckingAuth = ref(Boolean(getStoredToken()));
 const isAuthModalOpen = ref(false);
 const authNotice = ref("");
 
@@ -341,15 +360,15 @@ onMounted(async () => {
 
   onUnauthorized(() => {
     currentUser.value = null;
+    isCheckingAuth.value = false;
     chatSessions.value = [];
     savedNews.value = [];
     customSources.value = [];
     currentSessionId.value = null;
-    if (selectedScope.value !== "global") {
-      selectedScope.value = "global";
-      selectedCustomSourceId.value = null;
-    }
-    openAuthModal("Sua sessão expirou. Entre novamente com o Google.");
+    messages.value = [];
+    selectedScope.value = "global";
+    selectedCustomSourceId.value = null;
+    authNotice.value = "Sua sessão expirou. Entre novamente com o Google.";
   });
 
   if (getStoredToken()) {
@@ -361,7 +380,15 @@ onMounted(async () => {
     } catch {
       clearStoredSession();
       currentUser.value = null;
+    } finally {
+      isCheckingAuth.value = false;
     }
+  } else {
+    const cachedUser = getStoredUser();
+    if (cachedUser) {
+      clearStoredSession();
+    }
+    isCheckingAuth.value = false;
   }
 });
 
@@ -399,9 +426,10 @@ function handleLogout() {
   savedNews.value = [];
   customSources.value = [];
   currentSessionId.value = null;
+  messages.value = [];
   selectedScope.value = "global";
   selectedCustomSourceId.value = null;
-  showStatus("Você saiu da sua conta.");
+  authNotice.value = "Você saiu da sua conta. Entre novamente para continuar.";
 }
 
 async function loadUserWorkspace() {
@@ -638,6 +666,26 @@ function resetTextareaHeight() {
 </script>
 
 <style scoped>
+.auth-loading-screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.spinner.large {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+  border-color: var(--color-border);
+  border-top-color: var(--color-accent);
+}
+
 /* ── Shell ───────────────────────────────────────────────────────────────── */
 .app-shell {
   display: flex;

@@ -1,15 +1,52 @@
 <template>
   <transition name="fade">
-    <div v-if="isOpen" class="modal-overlay" @click.self="$emit('close')">
-      <div class="modal-content auth-modal">
+    <div
+      v-if="isOpen"
+      :class="mode === 'screen' ? 'auth-screen' : 'modal-overlay'"
+      @click.self="mode === 'modal' && $emit('close')"
+    >
+      <!-- Botão de tema no canto quando em modo tela cheia -->
+      <button
+        v-if="mode === 'screen'"
+        type="button"
+        class="screen-theme-btn"
+        :title="isDarkMode ? 'Modo Claro' : 'Modo Escuro'"
+        @click="$emit('toggle-theme')"
+      >
+        <svg v-if="!isDarkMode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5" />
+          <line x1="12" y1="1" x2="12" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="23" />
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+          <line x1="1" y1="12" x2="3" y2="12" />
+          <line x1="21" y1="12" x2="23" y2="12" />
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+        </svg>
+      </button>
+
+      <div class="modal-content auth-modal" :class="{ 'screen-card': mode === 'screen' }">
         <div class="modal-header">
-          <div class="modal-title-wrap">
-            <h3>{{ user ? "Minha Conta Google" : "Entrar no RAG News" }}</h3>
-            <span class="modal-sub">
-              {{ user ? "Sessão autenticada via JWT" : "Autenticação exclusiva com Google OAuth 2.0" }}
-            </span>
+          <div class="brand-header-wrap">
+            <div v-if="mode === 'screen'" class="brand-badge">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v2" />
+                <path d="M2 20h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H2" />
+                <path d="M6 10h8M6 14h8M6 18h4" />
+              </svg>
+            </div>
+            <div class="modal-title-wrap">
+              <h3>{{ user ? "Minha Conta Google" : "Entrar no RAG News" }}</h3>
+              <span class="modal-sub">
+                {{ user ? "Sessão autenticada via JWT" : "Login obrigatório · Google OAuth 2.0" }}
+              </span>
+            </div>
           </div>
-          <button class="close-btn" title="Fechar" @click="$emit('close')">
+          <button v-if="mode === 'modal'" class="close-btn" title="Fechar" @click="$emit('close')">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -32,18 +69,21 @@
           <!-- Estado NÃO autenticado -->
           <div v-if="!user" class="auth-login-flow">
             <p class="auth-description">
-              Entre com sua conta Google para salvar notícias, cadastrar feeds RSS ou tópicos personalizados e consultar seu acervo privado no chat RAG.
+              Entre com sua conta Google para acessar o chat de notícias, salvar artigos, cadastrar fontes RSS ou tópicos personalizados e manter seu histórico de conversas.
             </p>
 
             <!-- Botão oficial Google Identity Services -->
             <div class="gsi-box">
-              <div v-if="activeClientId" class="gsi-btn-holder">
+              <div v-if="loadingConfig" class="muted-hint">
+                Carregando configuração do Google OAuth...
+              </div>
+              <div v-else-if="activeClientId" class="gsi-btn-holder">
                 <div ref="googleBtnRef" class="gsi-target" />
                 <p v-if="!gsiReady" class="muted-hint">Carregando botão do Google...</p>
               </div>
               <div v-else class="client-id-missing">
                 <p class="muted-hint">
-                  Nenhum <code>VITE_GOOGLE_CLIENT_ID</code> configurado. Informe um Client ID OAuth 2.0 abaixo para usar o botão do Google ou use o login com token manual.
+                  Nenhum <code>GOOGLE_CLIENT_ID</code> foi encontrado no backend ou em <code>VITE_GOOGLE_CLIENT_ID</code>. Informe o Client ID abaixo ou utilize o login com token manual.
                 </p>
               </div>
 
@@ -132,21 +172,24 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { authApi, usersApi } from "../services/api";
 
 const GOOGLE_CLIENT_ID_KEY = "rag_news_google_client_id";
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
+  mode: { type: String, default: "modal" }, // 'screen' | 'modal'
   user: { type: Object, default: null },
   notice: { type: String, default: "" },
+  isDarkMode: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["close", "authenticated", "updated-user", "logout"]);
+const emit = defineEmits(["close", "authenticated", "updated-user", "logout", "toggle-theme"]);
 
 const googleBtnRef = ref(null);
 const gsiReady = ref(false);
+const loadingConfig = ref(false);
 const isSubmitting = ref(false);
 const errorMsg = ref("");
 const successMsg = ref("");
@@ -172,25 +215,56 @@ const userInitial = computed(() => {
   return source.trim().charAt(0).toUpperCase();
 });
 
+async function ensureClientIdLoaded() {
+  if (activeClientId.value) return;
+  loadingConfig.value = true;
+  try {
+    const config = await authApi.getConfig();
+    const backendClientId = (config?.google_client_id || "").trim();
+    if (backendClientId) {
+      activeClientId.value = backendClientId;
+      clientIdDraft.value = backendClientId;
+    }
+  } catch {
+    // Silencioso: usuário ainda pode informar Client ID manualmente ou usar token
+  } finally {
+    loadingConfig.value = false;
+  }
+}
+
+async function syncStateOnOpen() {
+  errorMsg.value = "";
+  successMsg.value = "";
+
+  if (!props.isOpen) {
+    stopGsiPoll();
+    return;
+  }
+
+  if (props.user) {
+    profileName.value = props.user.name || "";
+    profilePicture.value = props.user.picture_url || "";
+    stopGsiPoll();
+    return;
+  }
+
+  await ensureClientIdLoaded();
+  if (activeClientId.value) {
+    await nextTick();
+    initGoogleButton();
+  }
+}
+
+onMounted(() => {
+  if (props.isOpen) {
+    syncStateOnOpen();
+  }
+});
+
 watch(
   () => [props.isOpen, props.user, activeClientId.value],
-  async ([open, currentUser]) => {
-    errorMsg.value = "";
-    successMsg.value = "";
-
-    if (!open) {
-      stopGsiPoll();
-      return;
-    }
-
-    if (currentUser) {
-      profileName.value = currentUser.name || "";
-      profilePicture.value = currentUser.picture_url || "";
-      stopGsiPoll();
-    } else if (activeClientId.value) {
-      await nextTick();
-      initGoogleButton();
-    }
+  () => {
+    syncStateOnOpen();
   }
 );
 
@@ -215,7 +289,7 @@ function renderGsiButton() {
     callback: handleGoogleCredentialResponse,
   });
   window.google.accounts.id.renderButton(googleBtnRef.value, {
-    theme: "outline",
+    theme: props.isDarkMode ? "filled_black" : "outline",
     size: "large",
     text: "continue_with",
     shape: "rectangular",
@@ -304,6 +378,41 @@ function handleLogout() {
 </script>
 
 <style scoped>
+.auth-screen {
+  min-height: 100dvh;
+  width: 100%;
+  background: var(--color-bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  position: relative;
+}
+
+.screen-theme-btn {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.screen-theme-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+.screen-theme-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -326,6 +435,11 @@ function handleLogout() {
   overflow: hidden;
 }
 
+.screen-card {
+  max-width: 440px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -333,6 +447,29 @@ function handleLogout() {
   padding: 1.15rem 1.4rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
+}
+
+.brand-header-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--color-accent);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.brand-badge svg {
+  width: 20px;
+  height: 20px;
 }
 
 .modal-title-wrap {

@@ -10,12 +10,21 @@ Projeto de faculdade: sistema de **Retrieval-Augmented Generation (RAG)** para r
 
 ```
 faculdade-rag-news/
-├── backend/          # FastAPI + LangChain + LangGraph + OpenRouter
-│   ├── main.py
+├── backend/                  # FastAPI (Monólito Modular) + LangChain + LangGraph + OpenRouter
+│   ├── main.py               # Entrypoint de compatibilidade (uvicorn main:app)
 │   ├── requirements.txt
 │   ├── Dockerfile
-│   └── .env.example
-└── frontend/         # Vue 3 + Tailwind CSS
+│   ├── .env.example
+│   └── app/
+│       ├── main.py           # Factory create_app(), lifespan e registro de routers
+│       ├── core/             # Config, SQLAlchemy, segurança JWT/Google, PGVector, LLM
+│       ├── shared/           # Contratos (DTOs) e dependências de autenticação (get_current_user)
+│       └── modules/          # Domínios isolados
+│           ├── auth/         # Login exclusivo via Google OAuth 2.0 + JWT
+│           ├── users/        # Perfil e persistência de usuários
+│           ├── news/         # Feed BBC global, notícias salvas e fontes personalizadas
+│           └── rag_chat/     # Grafo LangGraph isolado por escopo/usuário + histórico
+└── frontend/                 # Vue 3 + Tailwind CSS
     ├── src/
     │   ├── App.vue
     │   ├── main.js
@@ -55,12 +64,41 @@ uvicorn main:app --reload --port 8000
 
 ### Rotas da API
 
-| Método | Rota      | Descrição                                                                         |
-|--------|-----------|-----------------------------------------------------------------------------------|
-| GET    | `/`       | Health check e modelos ativos                                                     |
-| POST   | `/ingest` | Busca notícias da BBC, gera embeddings e salva no PGVector                       |
-| POST   | `/chat`   | Recebe pergunta e gera resposta via LangGraph + OpenRouter                        |
-| POST   | `/reset`  | Reseta tabelas do PGVector no Supabase (usar se trocar o modelo de embeddings)   |
+#### Públicas / Compatibilidade
+| Método | Rota           | Descrição                                                                       |
+|--------|----------------|---------------------------------------------------------------------------------|
+| GET    | `/`            | Health check, modelos ativos e arquitetura                                      |
+| POST   | `/ingest`      | Busca notícias da BBC, gera embeddings e salva no PGVector (atalho legado)      |
+| POST   | `/reset`       | Reseta tabelas do PGVector no Supabase (usar se trocar o modelo de embeddings) |
+| POST   | `/chat`        | Pergunta ao RAG (`scope`: `global`, `saved`, `custom`, `personal_all`)         |
+
+#### Autenticação & Usuários (`/auth`, `/users`)
+| Método | Rota             | Descrição                                                                 |
+|--------|------------------|---------------------------------------------------------------------------|
+| POST   | `/auth/google`   | Login exclusivo via Google OAuth 2.0 (`credential` / `id_token` / `token`)|
+| GET    | `/auth/me`       | Valida JWT e retorna usuário autenticado                                  |
+| GET    | `/users/me`      | Perfil do usuário autenticado                                             |
+| PATCH  | `/users/me`      | Atualiza dados de perfil do usuário autenticado                           |
+
+#### Notícias & Fontes Personalizadas (`/news`)
+| Método | Rota                         | Descrição                                                        |
+|--------|------------------------------|------------------------------------------------------------------|
+| GET    | `/news/feed`                 | Lista artigos recentes dos feeds globais (BBC)                   |
+| POST   | `/news/ingest`               | Executa ingestão global dos feeds da BBC                         |
+| GET    | `/news/saved`                | Lista notícias salvas pelo usuário autenticado                   |
+| POST   | `/news/saved`                | Salva notícia (feed ou URL externa) e indexa vetores do usuário  |
+| DELETE | `/news/saved/{news_id}`      | Remove notícia salva e seus embeddings                           |
+| GET    | `/news/sources`              | Lista fontes personalizadas do usuário                           |
+| POST   | `/news/sources`              | Cadastra fonte personalizada (`rss_feed`, `article_url`, `topic`)|
+| POST   | `/news/sources/{id}/sync`    | Sincroniza e indexa conteúdos da fonte personalizada             |
+| DELETE | `/news/sources/{id}`         | Remove fonte personalizada e seus embeddings                     |
+
+#### Histórico de Chat (`/chat`)
+| Método | Rota                   | Descrição                                              |
+|--------|------------------------|--------------------------------------------------------|
+| GET    | `/chat/sessions`       | Lista sessões de chat do usuário autenticado           |
+| GET    | `/chat/sessions/{id}`  | Detalhes da sessão com histórico completo de mensagens |
+| DELETE | `/chat/sessions/{id}`  | Remove uma sessão de chat e suas mensagens             |
 
 ---
 

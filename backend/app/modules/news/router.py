@@ -22,10 +22,10 @@ router = APIRouter(prefix="/news", tags=["News"])
 
 @router.get("/feed", response_model=list[FeedArticleItem])
 def list_global_feed(
-    limit: int = Query(default=30, ge=1, le=100),
+    limit: int = Query(default=60, ge=1, le=150),
     _current_user: CurrentUserDTO = Depends(get_current_user),
 ) -> list[FeedArticleItem]:
-    """Lista artigos recentes dos feeds RSS globais (BBC)."""
+    """Lista artigos recentes dos feeds RSS globais (Brasil PT-BR, Tech e BBC)."""
     return NewsService.fetch_global_feed_items(limit=limit)
 
 

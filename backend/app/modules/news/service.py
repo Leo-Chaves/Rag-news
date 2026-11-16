@@ -47,8 +47,12 @@ class NewsService:
             raise ConfigurationError("DATABASE_URL não configurada.")
 
     @staticmethod
-    def fetch_global_feed_items(limit: int = 30) -> list[FeedArticleItem]:
-        entries = fetch_rss_feed_entries(settings.BBC_RSS_URLS, limit=limit)
+    def fetch_global_feed_items(limit: int = 60) -> list[FeedArticleItem]:
+        entries = fetch_rss_feed_entries(
+            settings.GLOBAL_RSS_FEEDS,
+            limit=limit,
+            per_feed_limit=8,
+        )
         return [FeedArticleItem(**item) for item in entries]
 
     @staticmethod
@@ -59,21 +63,22 @@ class NewsService:
         logger.info("Fontes globais já existentes no banco: %d", len(existing))
 
         chunks, chunk_metadata, total_articles, skipped = fetch_and_chunk_rss(
-            settings.BBC_RSS_URLS,
+            settings.GLOBAL_RSS_FEEDS,
             existing_sources=existing,
             extra_metadata={"scope": "global"},
+            max_per_feed=settings.MAX_ARTICLES_PER_FEED,
         )
 
         if not chunks:
             if skipped > 0:
                 return GlobalIngestResponse(
                     message="Todas as notícias já estão atualizadas no banco.",
-                    feeds_processados=len(settings.BBC_RSS_URLS),
+                    feeds_processados=len(settings.GLOBAL_RSS_FEEDS),
                     articles_processed=0,
                     chunks_stored=0,
                     skipped=skipped,
                 )
-            raise ValidationError("Nenhum conteúdo válido encontrado nos feeds da BBC.")
+            raise ValidationError("Nenhum conteúdo válido encontrado nos feeds RSS globais.")
 
         try:
             vs = get_vector_store()
@@ -88,8 +93,8 @@ class NewsService:
             ) from exc
 
         return GlobalIngestResponse(
-            message="Ingestão dos feeds da BBC concluída com sucesso.",
-            feeds_processados=len(settings.BBC_RSS_URLS),
+            message="Ingestão dos feeds globais concluída com sucesso.",
+            feeds_processados=len(settings.GLOBAL_RSS_FEEDS),
             articles_processed=total_articles,
             chunks_stored=len(chunks),
             skipped=skipped,

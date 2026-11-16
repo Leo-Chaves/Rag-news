@@ -30,7 +30,7 @@
       <p class="sidebar-section-title">Biblioteca & Fontes</p>
       <div class="nav-list">
         <button class="nav-item-btn" @click="$emit('open-news-manager', 'feed')">
-          <span>🌐 Explorar Feed BBC</span>
+          <span>🌐 Explorar Feed Global</span>
         </button>
         <button class="nav-item-btn" @click="$emit('open-news-manager', 'saved')">
           <span>🔖 Notícias Salvas</span>
@@ -93,14 +93,14 @@
       </div>
     </div>
 
-    <!-- Ingest BBC Feeds -->
+    <!-- Ingest Global Feeds -->
     <div class="sidebar-section sidebar-footer">
-      <p class="sidebar-section-title">Feeds BBC (Global)</p>
+      <p class="sidebar-section-title">Fontes Globais (12 feeds)</p>
 
       <div class="feeds-list">
-        <div v-for="feed in bbcFeeds" :key="feed.label" class="feed-item">
-          <span class="feed-dot" />
-          <span>{{ feed.label }}</span>
+        <div v-for="group in globalFeedGroups" :key="group.label" class="feed-item">
+          <span class="feed-dot" :class="group.color" />
+          <span class="feed-label">{{ group.label }}</span>
         </div>
       </div>
 
@@ -146,19 +146,16 @@ defineEmits([
 ]);
 
 const quickQuestions = [
-  { id: 1, text: "O que aconteceu no recente ataque de drones a Moscou?" },
-  { id: 2, text: "Quais são os planos de Donald Trump para o arco do triunfo?" },
-  { id: 3, text: "O que Earl Spencer falou sobre a Princesa Diana na sua entrevista à BBC?" },
-  { id: 4, text: "O que o Chanceler alemão Merz comentou sobre os resultados das eleições?" },
-  { id: 5, text: "O que aconteceu no futebol hoje?" },
+  { id: 1, text: "Quais são os principais destaques do Brasil hoje?" },
+  { id: 2, text: "Quais são as novidades em Inteligência Artificial e tecnologia?" },
+  { id: 3, text: "O que está movimentando a economia e negócios no mundo?" },
+  { id: 4, text: "Quais são os principais acontecimentos internacionais?" },
 ];
 
-const bbcFeeds = [
-  { label: "BBC News — Geral" },
-  { label: "BBC News — Mundo" },
-  { label: "BBC News — Tecnologia" },
-  { label: "BBC News — Negócios" },
-  { label: "BBC News — Ciência & Ambiente" },
+const globalFeedGroups = [
+  { label: "Brasil PT-BR · G1, BBC Brasil, Agência Brasil", color: "dot-br" },
+  { label: "Tech · TechCrunch, Ars Technica, The Verge", color: "dot-tech" },
+  { label: "BBC Internacional · Geral, Mundo, Economia", color: "dot-intl" },
 ];
 
 const isIngesting = ref(false);
@@ -469,11 +466,23 @@ async function handleIngest() {
   color: var(--color-text-secondary);
 }
 .feed-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--color-accent-light);
   flex-shrink: 0;
+}
+.feed-dot.dot-br {
+  background: #10b981;
+}
+.feed-dot.dot-tech {
+  background: #a78bfa;
+}
+.feed-dot.dot-intl {
+  background: #60a5fa;
+}
+.feed-label {
+  line-height: 1.35;
 }
 
 /* Ingest button */

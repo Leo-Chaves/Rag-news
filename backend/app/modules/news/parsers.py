@@ -1,3 +1,4 @@
+import html as html_lib
 import logging
 import re
 from html.parser import HTMLParser
@@ -62,6 +63,30 @@ def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _strip_html(raw: str) -> str:
+    """Remove tags HTML residuais comuns em descrições de feeds RSS (ex.: G1)."""
+    if not raw:
+        return ""
+    without_tags = re.sub(r"<[^>]+>", " ", raw)
+    return _normalize_whitespace(html_lib.unescape(without_tags))
+
+
+def _normalize_feed_defs(feeds: list[dict[str, str]] | list[str]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for item in feeds:
+        if isinstance(item, str):
+            normalized.append({"url": item, "source_name": "Feed", "category": "Geral"})
+        else:
+            normalized.append(
+                {
+                    "url": item["url"],
+                    "source_name": item.get("source_name", "Feed"),
+                    "category": item.get("category", "Geral"),
+                }
+            )
+    return normalized
+
+
 def _matches_topic(title: str, summary: str, topic_keywords: str | None) -> bool:
     if not topic_keywords:
         return True
@@ -72,69 +97,113 @@ def _matches_topic(title: str, summary: str, topic_keywords: str | None) -> bool
     return any(term in haystack for term in terms)
 
 
-def fetch_rss_feed_entries(urls: list[str], limit: int = 30) -> list[dict[str, str]]:
-    """Lê feeds RSS e retorna lista deduplicada de artigos recentes."""
-    items: list[dict[str, str]] = []
+def fetch_rss_feed_entries(
+    feeds: list[dict[str, str]] | list[str],
+    limit: int = 60,
+    per_feed_limit: int = 8,
+) -> list[dict[str, str]]:
+    """
+    Lê feeds RSS e retorna lista balanceada (round-robin entre portais) e deduplicada.
+    """
+    feed_defs = _normalize_feed_defs(feeds)
+    buckets: list[list[dict[str, str]]] = []
     seen_links: set[str] = set()
 
-    for feed_url in urls:
-        feed = feedparser.parse(feed_url)
-        if getattr(feed, "bozo", False) and not getattr(feed, "entries", None):
+    for feed_def in feed_defs:
+        feed_url = feed_def["url"]
+        try:
+            parsed = feedparser.parse(feed_url)
+        except Exception as exc:
+            logger.warning("Falha ao ler feed '%s': %s", feed_url, exc)
             continue
 
-        for entry in feed.entries:
+        if getattr(parsed, "bozo", False) and not getattr(parsed, "entries", None):
+            continue
+
+        bucket: list[dict[str, str]] = []
+        for entry in parsed.entries:
             link = str(entry.get("link", "")).strip() or feed_url
             if link in seen_links:
                 continue
             seen_links.add(link)
 
-            title = _normalize_whitespace(str(entry.get("title", "")))
-            summary = _normalize_whitespace(
-                str(entry.get("summary", "") or entry.get("description", ""))
-            )
+            title = _strip_html(str(entry.get("title", "")))
+            summary = _strip_html(str(entry.get("summary", "") or entry.get("description", "")))
             published = str(entry.get("published", "")).strip()
 
-            items.append(
+            bucket.append(
                 {
                     "title": title or link,
-                    "summary": summary,
+                    "summary": summary[:450],
                     "url": link,
                     "published_at": published,
                     "feed_url": feed_url,
+                    "source_name": feed_def["source_name"],
+                    "category": feed_def["category"],
                 }
             )
-            if len(items) >= limit:
-                return items
+            if len(bucket) >= per_feed_limit:
+                break
+
+        if bucket:
+            buckets.append(bucket)
+
+    # Intercala os artigos entre os feeds para evitar que um único portal domine o topo
+    items: list[dict[str, str]] = []
+    idx = 0
+    while len(items) < limit:
+        added_in_round = False
+        for bucket in buckets:
+            if idx < len(bucket):
+                items.append(bucket[idx])
+                added_in_round = True
+                if len(items) >= limit:
+                    break
+        if not added_in_round:
+            break
+        idx += 1
 
     return items
 
 
 def fetch_and_chunk_rss(
-    urls: list[str],
+    feeds: list[dict[str, str]] | list[str],
     existing_sources: set[str] | None = None,
     extra_metadata: dict[str, Any] | None = None,
     topic_keywords: str | None = None,
+    max_per_feed: int | None = None,
 ) -> tuple[list[str], list[dict[str, Any]], int, int]:
     """
-    Busca artigos de feeds RSS, aplica deduplicação e filtro opcional por tópico,
-    e retorna (chunks, metadatas, total_artigos, skipped).
+    Busca artigos de feeds RSS, aplica deduplicação, filtro opcional por tópico
+    e limite por feed, retornando (chunks, metadatas, total_artigos, skipped).
     """
     if existing_sources is None:
         existing_sources = set()
 
+    feed_defs = _normalize_feed_defs(feeds)
     all_docs: list[str] = []
     metadata_list: list[dict[str, Any]] = []
     skipped = 0
     seen_in_batch: set[str] = set()
 
-    for url in urls:
-        feed = feedparser.parse(url)
+    for feed_def in feed_defs:
+        url = feed_def["url"]
+        try:
+            feed = feedparser.parse(url)
+        except Exception as exc:
+            logger.warning("Falha ao processar feed '%s': %s", url, exc)
+            continue
+
         if getattr(feed, "bozo", False) and not getattr(feed, "entries", None):
             continue
 
+        processed_from_feed = 0
         for entry in feed.entries:
-            title = str(entry.get("title", "")).strip()
-            summary = str(entry.get("summary", "") or entry.get("description", "")).strip()
+            if max_per_feed is not None and processed_from_feed >= max_per_feed:
+                break
+
+            title = _strip_html(str(entry.get("title", "")))
+            summary = _strip_html(str(entry.get("summary", "") or entry.get("description", "")))
             link = str(entry.get("link", url)).strip() or url
             published = str(entry.get("published", "")).strip()
 
@@ -152,11 +221,14 @@ def fetch_and_chunk_rss(
                     "source": link,
                     "title": title,
                     "published": published,
+                    "source_name": feed_def["source_name"],
+                    "category": feed_def["category"],
                 }
                 if extra_metadata:
                     meta.update(extra_metadata)
                 all_docs.append(content)
                 metadata_list.append(meta)
+                processed_from_feed += 1
 
     if skipped:
         logger.info("Deduplicação: %d artigos já existentes foram ignorados.", skipped)

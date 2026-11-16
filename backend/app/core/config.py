@@ -92,13 +92,74 @@ class Settings:
         "openrouter/free",
     ]
 
-    BBC_RSS_URLS: List[str] = [
-        "http://feeds.bbci.co.uk/news/rss.xml",
-        "http://feeds.bbci.co.uk/news/world/rss.xml",
-        "http://feeds.bbci.co.uk/news/technology/rss.xml",
-        "http://feeds.bbci.co.uk/news/business/rss.xml",
-        "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    GLOBAL_RSS_FEEDS: List[dict[str, str]] = [
+        # Brasil (PT-BR)
+        {
+            "source_name": "G1",
+            "category": "Brasil (PT-BR)",
+            "url": "https://g1.globo.com/rss/g1/",
+        },
+        {
+            "source_name": "G1 Tech",
+            "category": "Tech & Inovação",
+            "url": "https://g1.globo.com/rss/g1/tecnologia/",
+        },
+        {
+            "source_name": "BBC Brasil",
+            "category": "Brasil (PT-BR)",
+            "url": "https://feeds.bbci.co.uk/portuguese/rss.xml",
+        },
+        {
+            "source_name": "Agência Brasil",
+            "category": "Brasil (PT-BR)",
+            "url": "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml",
+        },
+        # Tech & Inovação (EN)
+        {
+            "source_name": "TechCrunch",
+            "category": "Tech & Inovação",
+            "url": "https://techcrunch.com/feed/",
+        },
+        {
+            "source_name": "Ars Technica",
+            "category": "Tech & Inovação",
+            "url": "https://feeds.arstechnica.com/arstechnica/index",
+        },
+        {
+            "source_name": "The Verge",
+            "category": "Tech & Inovação",
+            "url": "https://www.theverge.com/rss/index.xml",
+        },
+        # BBC Internacional (EN)
+        {
+            "source_name": "BBC News",
+            "category": "BBC Internacional",
+            "url": "http://feeds.bbci.co.uk/news/rss.xml",
+        },
+        {
+            "source_name": "BBC World",
+            "category": "BBC Internacional",
+            "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+        },
+        {
+            "source_name": "BBC Tech",
+            "category": "Tech & Inovação",
+            "url": "http://feeds.bbci.co.uk/news/technology/rss.xml",
+        },
+        {
+            "source_name": "BBC Business",
+            "category": "BBC Internacional",
+            "url": "http://feeds.bbci.co.uk/news/business/rss.xml",
+        },
+        {
+            "source_name": "BBC Science",
+            "category": "BBC Internacional",
+            "url": "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+        },
     ]
+
+    BBC_RSS_URLS: List[str] = [feed["url"] for feed in GLOBAL_RSS_FEEDS]
+    MAX_ARTICLES_PER_FEED: int = _parse_int_env("MAX_ARTICLES_PER_FEED", 12)
 
     DATABASE_URL: str = _build_database_url()
 

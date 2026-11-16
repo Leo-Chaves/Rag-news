@@ -161,15 +161,25 @@
       <section ref="messagesContainer" class="messages-area">
         <!-- Empty state -->
         <div v-if="messages.length === 0" class="empty-state">
-          <div class="empty-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </div>
-          <h2 class="empty-title">Como posso ajudar?</h2>
+          <div class="empty-badge">RAG News · Inteligência Editorial</div>
+          <h2 class="empty-title">O que você quer investigar hoje?</h2>
           <p class="empty-sub">
-            Selecione o escopo abaixo (<strong>Global BBC</strong> ou seu <strong>Acervo Pessoal</strong>) e faça uma pergunta sobre as notícias.
+            Pergunte sobre notícias do <strong>Brasil</strong>, <strong>Tecnologia</strong>, <strong>BBC</strong> ou filtre pelo seu <strong>Acervo Pessoal</strong>.
           </p>
+
+          <div class="starter-grid">
+            <button
+              v-for="card in starterCards"
+              :key="card.title"
+              type="button"
+              class="starter-card"
+              @click="handleStarterCard(card)"
+            >
+              <span class="starter-tag">{{ card.tag }}</span>
+              <strong class="starter-title">{{ card.title }}</strong>
+              <span class="starter-prompt">{{ card.question }}</span>
+            </button>
+          </div>
         </div>
 
         <!-- Message list -->
@@ -309,10 +319,37 @@ const savedNews = ref([]);
 const customSources = ref([]);
 
 const scopeOptions = [
-  { value: "global", label: "🌐 Global (BBC)" },
+  { value: "global", label: "🌐 Global (Portais)" },
   { value: "saved", label: "🔖 Salvas" },
   { value: "custom", label: "📡 Personalizadas" },
   { value: "personal_all", label: "✨ Acervo Completo" },
+];
+
+const starterCards = [
+  {
+    tag: "🇧🇷 Brasil (PT-BR)",
+    title: "Destaques do dia no Brasil",
+    question: "Quais são os principais destaques e notícias do Brasil hoje?",
+    scope: "global",
+  },
+  {
+    tag: "🤖 Tecnologia & IA",
+    title: "Tendências e lançamentos Tech",
+    question: "Quais são as principais novidades em Inteligência Artificial e tecnologia?",
+    scope: "global",
+  },
+  {
+    tag: "🌍 Mundo & Economia",
+    title: "Cenário internacional",
+    question: "Quais são os principais acontecimentos internacionais e econômicos hoje?",
+    scope: "global",
+  },
+  {
+    tag: "🔖 Meu Acervo",
+    title: "Consultar minhas fontes",
+    question: "Faça um resumo dos principais pontos das minhas notícias salvas e fontes.",
+    scope: "personal_all",
+  },
 ];
 
 const savedUrls = computed(() => savedNews.value.map((n) => n.url));
@@ -331,7 +368,7 @@ const firstName = computed(() => {
 
 const inputPlaceholder = computed(() => {
   const map = {
-    global: "Pergunte sobre as notícias globais (BBC)...",
+    global: "Pergunte sobre as notícias globais (Brasil, Tech e BBC)...",
     saved: "Pergunte sobre as suas notícias salvas...",
     custom: "Pergunte sobre as suas fontes personalizadas...",
     personal_all: "Pergunte sobre todo o seu acervo pessoal...",
@@ -540,6 +577,14 @@ async function handleDeleteSession(sessionId) {
 function handleQuickQuestion(text) {
   isSidebarOpen.value = false;
   sendMessage(text);
+}
+
+function handleStarterCard(card) {
+  selectedScope.value = card.scope || "global";
+  if (selectedScope.value !== "custom") {
+    selectedCustomSourceId.value = null;
+  }
+  sendMessage(card.question);
 }
 
 async function sendMessage(text) {
@@ -936,35 +981,75 @@ function resetTextareaHeight() {
   flex: 1;
   text-align: center;
   gap: 0.75rem;
-  padding: 2rem;
+  padding: 2rem 1rem;
   color: var(--color-text-secondary);
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
 }
-.empty-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px;
-  height: 64px;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
+.empty-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--color-accent-light);
-}
-.empty-icon svg {
-  width: 32px;
-  height: 32px;
+  background: var(--color-accent-soft);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  padding: 0.3rem 0.75rem;
+  border-radius: 99px;
 }
 .empty-title {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
+  margin: 0.2rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
   color: var(--color-text-primary);
 }
 .empty-sub {
   margin: 0;
-  font-size: 0.85rem;
-  max-width: 400px;
+  font-size: 0.88rem;
+  max-width: 480px;
   line-height: 1.6;
+}
+.starter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 1rem;
+}
+.starter-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 0.35rem;
+  padding: 0.95rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  box-shadow: var(--color-shadow-sm);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.starter-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-accent);
+  box-shadow: var(--color-shadow-md);
+}
+.starter-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-accent-light);
+}
+.starter-title {
+  font-size: 0.88rem;
+  color: var(--color-text-primary);
+}
+.starter-prompt {
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
 }
 
 /* ── Banners ──────────────────────────────────────────────────────────────── */
@@ -1133,6 +1218,9 @@ function resetTextareaHeight() {
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+  .starter-grid {
+    grid-template-columns: 1fr;
+  }
   .icon-btn.mobile-menu-btn {
     display: flex;
   }

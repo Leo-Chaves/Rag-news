@@ -16,6 +16,8 @@ class FeedArticleItem(BaseModel):
     url: str
     published_at: str = ""
     feed_url: str
+    source_name: str = "Feed"
+    category: str = "Geral"
 
 
 class SavedNewsCreate(BaseModel):

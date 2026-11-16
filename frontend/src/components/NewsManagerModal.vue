@@ -25,7 +25,7 @@
             :class="{ active: activeTab === 'feed' }"
             @click="switchTab('feed')"
           >
-            🌐 Feed BBC
+            🌐 Feed Global
           </button>
           <button
             class="tab-btn"
@@ -49,31 +49,59 @@
             {{ feedbackMsg }}
           </div>
 
-          <!-- TAB 1: FEED GLOBAL BBC -->
+          <!-- TAB 1: FEED GLOBAL -->
           <div v-if="activeTab === 'feed'" class="tab-panel">
             <div class="panel-toolbar">
-              <span class="toolbar-info">Manchetes recentes dos feeds RSS da BBC</span>
+              <span class="toolbar-info">Portais Brasil (PT-BR), Tech & Inovação e BBC</span>
               <div class="toolbar-actions">
                 <button class="secondary-btn" :disabled="loadingFeed" @click="loadGlobalFeed">
                   {{ loadingFeed ? "Carregando..." : "Recarregar Lista" }}
                 </button>
                 <button class="primary-btn" :disabled="ingestingGlobal" @click="handleIngestGlobal">
-                  {{ ingestingGlobal ? "Indexando..." : "Ingerir BBC no RAG" }}
+                  {{ ingestingGlobal ? "Indexando..." : "Ingerir Feeds no RAG" }}
                 </button>
               </div>
             </div>
 
+            <!-- Filtros por categoria e busca -->
+            <div class="feed-filters">
+              <div class="category-pills">
+                <button
+                  v-for="cat in feedCategories"
+                  :key="cat"
+                  type="button"
+                  class="filter-pill"
+                  :class="{ active: selectedCategory === cat }"
+                  @click="selectedCategory = cat"
+                >
+                  {{ cat }}
+                </button>
+              </div>
+              <input
+                v-model="feedSearch"
+                type="search"
+                class="text-input search-input"
+                placeholder="Filtrar por título ou portal..."
+              />
+            </div>
+
             <div v-if="loadingFeed" class="empty-box">Buscando manchetes dos feeds RSS...</div>
-            <div v-else-if="feedItems.length === 0" class="empty-box">
-              Nenhuma notícia carregada no momento.
+            <div v-else-if="filteredFeedItems.length === 0" class="empty-box">
+              Nenhuma notícia encontrada para este filtro.
             </div>
             <div v-else class="cards-list">
-              <article v-for="item in feedItems" :key="item.url" class="item-card">
+              <article v-for="item in filteredFeedItems" :key="item.url" class="item-card">
+                <div class="item-meta-top">
+                  <span class="source-badge" :class="categoryClass(item.category)">
+                    {{ item.source_name || "Feed" }}
+                  </span>
+                  <span class="category-label">{{ item.category || "Geral" }}</span>
+                  <span v-if="item.published_at" class="item-date">{{ formatDate(item.published_at) }}</span>
+                </div>
                 <div class="item-header">
                   <a :href="item.url" target="_blank" rel="noopener noreferrer" class="item-title">
                     {{ item.title }}
                   </a>
-                  <span v-if="item.published_at" class="item-date">{{ item.published_at }}</span>
                 </div>
                 <p v-if="item.summary" class="item-summary">{{ item.summary }}</p>
                 <div class="item-footer">
@@ -266,7 +294,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { newsApi } from "../services/api";
 
 const props = defineProps({
@@ -294,6 +322,33 @@ const feedItems = ref([]);
 const loadingFeed = ref(false);
 const ingestingGlobal = ref(false);
 const savingUrl = ref("");
+const selectedCategory = ref("Todas");
+const feedSearch = ref("");
+
+const feedCategories = [
+  "Todas",
+  "Brasil (PT-BR)",
+  "Tech & Inovação",
+  "BBC Internacional",
+];
+
+const filteredFeedItems = computed(() => {
+  const query = feedSearch.value.trim().toLowerCase();
+  return feedItems.value.filter((item) => {
+    const matchesCat =
+      selectedCategory.value === "Todas" || item.category === selectedCategory.value;
+    if (!matchesCat) return false;
+    if (!query) return true;
+    const haystack = `${item.title} ${item.summary} ${item.source_name}`.toLowerCase();
+    return haystack.includes(query);
+  });
+});
+
+function categoryClass(category) {
+  if (category === "Brasil (PT-BR)") return "cat-br";
+  if (category === "Tech & Inovação") return "cat-tech";
+  return "cat-intl";
+}
 
 const externalUrl = ref("");
 const externalTitle = ref("");
@@ -341,9 +396,9 @@ function isUrlSaved(url) {
 async function loadGlobalFeed() {
   loadingFeed.value = true;
   try {
-    feedItems.value = await newsApi.getGlobalFeed(30);
+    feedItems.value = await newsApi.getGlobalFeed(60);
   } catch (err) {
-    setFeedback(err.response?.data?.detail || "Erro ao carregar feed da BBC.", true);
+    setFeedback(err.response?.data?.detail || "Erro ao carregar feed global.", true);
   } finally {
     loadingFeed.value = false;
   }
@@ -761,6 +816,84 @@ a.item-title:hover {
   font-size: 0.72rem;
   color: var(--color-text-muted);
   white-space: nowrap;
+  margin-left: auto;
+}
+
+.feed-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.filter-pill {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  padding: 0.28rem 0.68rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-pill:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+
+.filter-pill.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+  font-weight: 600;
+}
+
+.search-input {
+  max-width: 240px;
+}
+
+.item-meta-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.source-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.14rem 0.5rem;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+
+.source-badge.cat-br {
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+}
+
+.source-badge.cat-tech {
+  background: rgba(139, 92, 246, 0.14);
+  color: #a78bfa;
+}
+
+.source-badge.cat-intl {
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+}
+
+.category-label {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
 }
 
 .item-summary {

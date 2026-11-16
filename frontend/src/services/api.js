@@ -107,7 +107,7 @@ export const usersApi = {
 };
 
 export const newsApi = {
-  async getGlobalFeed(limit = 30) {
+  async getGlobalFeed(limit = 60) {
     const { data } = await apiClient.get("/news/feed", { params: { limit } });
     return data;
   },

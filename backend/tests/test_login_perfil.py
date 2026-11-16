@@ -178,6 +178,40 @@ def test_fetch_tags_category_and_dedups_across_feeds(monkeypatch):
     assert n == 2 and skipped == 2
 
 
+# ── limites do Groq ─────────────────────────────────────────────────────────
+def _llm_raising(exc):
+    from langchain_core.runnables import RunnableLambda
+    def boom(_): raise exc
+    return lambda **kw: RunnableLambda(boom)
+
+def _groq_error(cls, code):
+    import httpx
+    resp = httpx.Response(code, request=httpx.Request("POST", "https://api.groq.com/x"))
+    return cls("erro", response=resp, body=None)
+
+def test_chat_rate_limit_is_503_with_retry_after(monkeypatch):
+    import groq
+    FakeVS.results = RESULTS
+    monkeypatch.setattr(main, "ChatGroq", _llm_raising(_groq_error(groq.RateLimitError, 429)))
+    r = client.post("/chat", json={"question": "q"})
+    assert r.status_code == 503 and r.headers["retry-after"] == "30" and "limite" in r.json()["detail"]
+
+def test_chat_groq_error_is_502(monkeypatch):
+    import groq
+    FakeVS.results = RESULTS
+    monkeypatch.setattr(main, "ChatGroq", _llm_raising(_groq_error(groq.InternalServerError, 500)))
+    assert client.post("/chat", json={"question": "q"}).status_code == 502
+
+def test_answer_llm_has_max_tokens(monkeypatch):
+    seen = {}
+    def fake(**kw):
+        seen.update(kw); return FakeListChatModel(responses=["ok"] * 10)
+    monkeypatch.setattr(main, "ChatGroq", fake)
+    FakeVS.results = RESULTS
+    assert client.post("/chat", json={"question": "q"}).status_code == 200
+    assert seen["max_tokens"] == main.GROQ_MAX_TOKENS <= 1000
+
+
 # ── deduplicação contra o banco ─────────────────────────────────────────────
 def _fake_connect(on_execute):
     class Cur:

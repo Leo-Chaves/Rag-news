@@ -5,6 +5,7 @@ import urllib.parse
 from pathlib import Path
 # pyrefly: ignore [missing-import]
 import feedparser
+import groq
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -97,6 +98,13 @@ app.add_middleware(
 # Os scores do MiniLM em buscas PT->EN costumam ficar entre ~0.05 e ~0.5,
 # então 0.1 reordena sem esconder notícias muito mais relevantes de outros temas.
 PREFERENCE_BOOST = float(os.getenv("PREFERENCE_BOOST", "0.1"))
+
+# LLM que escreve a resposta. No plano gratuito do Groq, o qwen aceita só
+# ~1000 tokens de SAÍDA por minuto, e sem max_tokens o Groq reserva uma resposta
+# longa (~1350 tokens) e recusa o pedido com 429. Com o teto, cabe a resposta
+# e sobra cota para a próxima pergunta.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "600"))
 
 # ---------------------------------------------------------------------------
 # Shared resources
@@ -419,8 +427,9 @@ def no_gerar_resposta(estado: EstadoRAG):
     )
     llm = ChatGroq(
         groq_api_key=GROQ_API_KEY,
-        model_name="qwen/qwen3.8-27b",
+        model_name=GROQ_MODEL,
         temperature=0.3,
+        max_tokens=GROQ_MAX_TOKENS,
     )
     chain = prompt | llm | StrOutputParser()
     resposta = chain.invoke({"contexto": estado["contexto"], "pergunta": estado["pergunta"]})
@@ -485,7 +494,21 @@ def chat(body: ChatRequest, user: Optional[AuthUser] = Depends(get_optional_user
             logger.warning("Não foi possível carregar preferências: %s", exc)
 
     # Invoca o grafo
-    resultado = grafo_rag.invoke({"pergunta": body.question, "top_k": 5, "temas_preferidos": temas})
+    try:
+        resultado = grafo_rag.invoke({"pergunta": body.question, "top_k": 5, "temas_preferidos": temas})
+    except groq.RateLimitError as exc:
+        logger.warning("Groq: limite de uso atingido: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="O serviço de IA atingiu o limite de uso por minuto. Aguarde uns 30 segundos e tente de novo.",
+            headers={"Retry-After": "30"},
+        )
+    except groq.APIError as exc:
+        logger.error("Groq: erro na geração da resposta: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="O serviço de IA não respondeu agora. Tente novamente em instantes.",
+        )
 
     docs = resultado.get("documentos_recuperados", [])
     sources = list(dict.fromkeys(doc.metadata.get("source") for doc in docs if doc.metadata.get("source")))

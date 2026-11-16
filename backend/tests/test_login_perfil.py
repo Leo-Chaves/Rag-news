@@ -176,3 +176,36 @@ def test_fetch_tags_category_and_dedups_across_feeds(monkeypatch):
         [("u_fut", "futebol"), ("u_sport", "esportes"), ("u_old", "geral")], existing_sources={"l3"})
     assert [(m["source"], m["category"]) for m in metas] == [("l1", "futebol"), ("l2", "esportes")]
     assert n == 2 and skipped == 2
+
+
+# ── deduplicação contra o banco ─────────────────────────────────────────────
+def _fake_connect(on_execute):
+    class Cur:
+        def __enter__(s): return s
+        def __exit__(s, *a): pass
+        def execute(s, sql, params=None): on_execute(sql)
+        def fetchall(s): return [("l1",), ("l2",)]
+    class Conn:
+        def __enter__(s): return s
+        def __exit__(s, *a): pass
+        def cursor(s): return Cur()
+    return lambda *a, **k: Conn()
+
+def test_existing_sources_query_is_unambiguous(monkeypatch):
+    seen = []
+    monkeypatch.setattr(main.psycopg, "connect", _fake_connect(seen.append))
+    assert main._get_existing_sources() == {"l1", "l2"}
+    import re
+    # toda referência a cmetadata precisa do alias da tabela de embeddings
+    assert not re.search(r"(?<!e\.)\bcmetadata\b", seen[0])
+
+def test_existing_sources_first_ingest_returns_empty(monkeypatch):
+    def boom(sql): raise main.psycopg.errors.UndefinedTable("no table")
+    monkeypatch.setattr(main.psycopg, "connect", _fake_connect(boom))
+    assert main._get_existing_sources() == set()
+
+def test_ingest_aborts_when_dedup_query_fails(monkeypatch):
+    def boom(sql): raise main.psycopg.OperationalError("db down")
+    monkeypatch.setattr(main.psycopg, "connect", _fake_connect(boom))
+    monkeypatch.setattr(main.feedparser, "parse", lambda url: pytest.fail("não deveria ler feeds"))
+    assert client.post("/ingest").status_code == 503

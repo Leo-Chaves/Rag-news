@@ -222,16 +222,26 @@ def _get_existing_sources() -> set:
     try:
         with psycopg.connect(_pg_conn_str()) as conn:
             with conn.cursor() as cur:
+                # "e." é obrigatório: as duas tabelas têm a coluna cmetadata e,
+                # sem o prefixo, o Postgres recusa a consulta ("ambiguous").
                 cur.execute("""
-                    SELECT DISTINCT cmetadata->>'source'
+                    SELECT DISTINCT e.cmetadata->>'source'
                     FROM langchain_pg_embedding e
                     JOIN langchain_pg_collection c ON e.collection_id = c.uuid
-                    WHERE c.name = %s AND cmetadata->>'source' IS NOT NULL
+                    WHERE c.name = %s AND e.cmetadata->>'source' IS NOT NULL
                 """, (COLLECTION_NAME,))
                 return {row[0] for row in cur.fetchall()}
-    except Exception as exc:
-        logger.warning("Não foi possível consultar fontes existentes: %s", exc)
+    except psycopg.errors.UndefinedTable:
+        # Primeira ingestão: o PGVector ainda não criou as tabelas.
         return set()
+    except Exception as exc:
+        # Não seguir sem a deduplicação: antes, um erro aqui fazia cada
+        # "Atualizar Notícias" regravar o banco inteiro em silêncio.
+        logger.error("Não foi possível consultar fontes existentes: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível verificar as notícias já salvas. Tente novamente.",
+        )
 
 
 def _fetch_and_chunk_rss(feeds: List[tuple[str, str]], existing_sources: set | None = None):

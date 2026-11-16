@@ -103,9 +103,20 @@ sobre outros assuntos continuam funcionando. Sem login, tudo funciona como antes
 - **Personalização no grafo LangGraph:**
 
   ```
-  START → traduzir → recuperar → (evidência?) ─sim→ personalizar → montar_contexto → gerar_resposta → END
+  START → traduzir → recuperar → (evidência?) ─sim→ filtrar → personalizar → montar_contexto → gerar_resposta → END
                                               └não→ sem_evidencia → END
   ```
+
+  `recuperar` busca 15 candidatos e descarta os itens promocionais fixos dos
+  feeds da BBC ("Download now", "Find out more here"), que também não são
+  gravados no `/ingest`. `filtrar` descarta as notícias com score abaixo de
+  `RELEVANCE_MIN_RATIO` (padrão 0.75) × o melhor: o chat pode responder com 2
+  fontes boas em vez de 5 com notícias fora do assunto. Se a pergunta fala de um
+  período recente ("hoje", "ontem", "esta semana", "últimas"...), as notícias
+  que passaram no filtro ganham um bônus de recência (`RECENCY_BOOST`, que cai
+  pela metade a cada `RECENCY_HALF_LIFE_DAYS`). Cada fonte vai para o modelo
+  com a data de publicação, e o prompt traz a data de hoje, para ele avisar
+  quando as notícias não forem do período perguntado.
 
   `traduzir` reescreve a pergunta em inglês (modelo `TRANSLATE_MODEL`, padrão
   `openai/gpt-oss-20b`) só para a busca: o modelo de embeddings e as notícias
@@ -113,7 +124,7 @@ sobre outros assuntos continuam funcionando. Sem login, tudo funciona como antes
   temas. A resposta continua usando a pergunta original, em PT-BR. Se a
   tradução falhar, a busca usa a pergunta original.
 
-  Com usuário logado, `recuperar` busca 3× mais candidatos e `personalizar`
+  Com usuário logado, `personalizar`
   soma `PREFERENCE_BOOST` (padrão 0.1) ao score das notícias dos temas
   preferidos antes de escolher os 5 melhores. O bônus só vale para notícias com
   score bruto de pelo menos `PREFERENCE_MIN_RATIO` (padrão 0.85) × o melhor

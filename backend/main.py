@@ -1,7 +1,10 @@
 import os
 import gc
+import re
 import logging
 import urllib.parse
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 # pyrefly: ignore [missing-import]
 import feedparser
@@ -115,6 +118,48 @@ GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "600"))
 # traziam notícias de outros temas. Modelo pequeno e separado para não gastar
 # a cota do modelo da resposta. Vazio desliga a tradução.
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-oss-20b")
+
+# Filtro por notícia: só vai para o contexto a notícia com score de pelo menos
+# esta fração do melhor resultado. Antes só o melhor score era checado, e as
+# outras 4 entravam mesmo sendo fracas (ex.: um quiz de futebol numa pergunta
+# sobre IA, com 66% do score do topo).
+RELEVANCE_MIN_RATIO = float(os.getenv("RELEVANCE_MIN_RATIO", "0.75"))
+
+# Perguntas sobre "hoje", "esta semana", "últimas"...: a busca vetorial não sabe
+# o que é recente, então a notícia ganha RECENCY_BOOST × 0.5^(idade em dias /
+# RECENCY_HALF_LIFE_DAYS). Hoje: +0.1; ontem: +0.05; uma semana: ~0.
+RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.1"))
+RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "1"))
+
+# Itens fixos dos feeds da BBC que só divulgam o app/site, sem notícia. Ficam
+# meses no feed e, por serem genéricos, aparecem no topo de buscas genéricas.
+PROMO_TITLES = {"download now", "find out more here"}
+
+_TEMPORAL_RE = re.compile(
+    r"\b(hoje|ontem|agora|atualmente|recentes?|recentemente|[uú]ltim[ao]s?|novidades?|"
+    r"(?:n?es[st]a|n?es[st]e) (?:semana|m[eê]s|manh[ãa])|"
+    r"today|yesterday|tonight|latest|recent|recently|currently|right now|breaking|"
+    r"this (?:week|morning|month))\b",
+    re.IGNORECASE,
+)
+
+
+def _pergunta_temporal(*textos: str) -> bool:
+    """True se a pergunta (original ou traduzida) fala de um período recente."""
+    return any(t and _TEMPORAL_RE.search(t) for t in textos)
+
+
+def _eh_promocional(title: str) -> bool:
+    return (title or "").strip().lower() in PROMO_TITLES
+
+
+def _data_publicacao(doc) -> Optional[datetime]:
+    """Data do RSS ('Sun, 15 Nov 2026 23:52:43 GMT') em UTC, ou None."""
+    try:
+        data = parsedate_to_datetime(doc.metadata.get("published") or "")
+    except (TypeError, ValueError, IndexError):
+        return None
+    return data if data.tzinfo else data.replace(tzinfo=timezone.utc)
 
 # ---------------------------------------------------------------------------
 # Shared resources
@@ -287,6 +332,9 @@ def _fetch_and_chunk_rss(feeds: List[tuple[str, str]], existing_sources: set | N
             link = entry.get("link", url)
             published = entry.get("published", "")
 
+            if _eh_promocional(title):
+                continue
+
             # Deduplicação: pula artigos já ingeridos
             if link in existing_sources:
                 skipped += 1
@@ -379,6 +427,7 @@ class EstadoRAG(TypedDict, total=False):
     top_k: int
     temas_preferidos: List[str]  # já expandidos (pai + subtemas); vazio = anônimo/sem preferência
     candidatos: list              # [(doc, score)] vindos do PGVector
+    temporal: bool                # pergunta sobre "hoje", "últimas"... (prioriza recentes)
     documentos_recuperados: list
     score_maximo: float
     personalizado: bool
@@ -425,16 +474,53 @@ def no_traduzir(estado: EstadoRAG):
 
 def no_recuperar(estado: EstadoRAG):
     vs = get_vector_store()
-    # Com preferências, buscamos mais candidatos para o nó "personalizar"
-    # ter de onde promover notícias dos temas favoritos.
-    k = estado["top_k"] * 3 if estado.get("temas_preferidos") else estado["top_k"]
+    # Buscamos 3× mais candidatos que o necessário: sobra o que filtrar (itens
+    # promocionais) e de onde "filtrar" e "personalizar" promovam notícias
+    # recentes ou dos temas favoritos. São poucas centenas de linhas no banco.
+    k = estado["top_k"] * 3
     consulta = estado.get("consulta_busca") or estado["pergunta"]
-    docs_scores = vs.similarity_search_with_relevance_scores(consulta, k=k)
+    docs_scores = [
+        (doc, score)
+        for doc, score in vs.similarity_search_with_relevance_scores(consulta, k=k)
+        if not _eh_promocional(doc.metadata.get("title", ""))
+    ]
 
     # O score máximo é o BRUTO (sem bônus): a decisão de evidência não pode
     # ser influenciada pela preferência, senão perguntas sem resposta passariam.
     score_max = max((score for _, score in docs_scores), default=0.0)
-    return {"candidatos": docs_scores, "score_maximo": score_max}
+    return {
+        "candidatos": docs_scores,
+        "score_maximo": score_max,
+        "temporal": _pergunta_temporal(estado["pergunta"], consulta),
+    }
+
+def no_filtrar(estado: EstadoRAG):
+    """
+    1. Descarta candidatos com score bruto abaixo de RELEVANCE_MIN_RATIO × o
+       melhor: é melhor responder com 2 fontes boas do que com 5 e lixo no meio.
+    2. Se a pergunta é sobre um período recente, soma o bônus de recência.
+       O bônus só reordena quem já passou pelo filtro de relevância.
+    Os scores que saem daqui são a base usada por "personalizar".
+    """
+    candidatos = sorted(estado.get("candidatos") or [], key=lambda x: x[1], reverse=True)
+    if not candidatos:
+        return {"candidatos": []}
+    piso = candidatos[0][1] * RELEVANCE_MIN_RATIO
+    relevantes = [(doc, score) for doc, score in candidatos if score >= piso]
+    if not estado.get("temporal"):
+        return {"candidatos": relevantes}
+
+    agora = datetime.now(timezone.utc)
+
+    def com_recencia(doc, score):
+        data = _data_publicacao(doc)
+        if data is None:
+            return score
+        idade_dias = max((agora - data).total_seconds() / 86400, 0.0)
+        return score + RECENCY_BOOST * 0.5 ** (idade_dias / RECENCY_HALF_LIFE_DAYS)
+
+    ajustados = [(doc, com_recencia(doc, score)) for doc, score in relevantes]
+    return {"candidatos": sorted(ajustados, key=lambda x: x[1], reverse=True)}
 
 def no_personalizar(estado: EstadoRAG):
     """
@@ -474,7 +560,9 @@ def no_montar_contexto(estado: EstadoRAG):
     partes = []
     for i, doc in enumerate(docs, 1):
         titulo = doc.metadata.get("title", f"Fonte {i}")
-        partes.append(f"[{titulo}]\n{doc.page_content}")
+        data = _data_publicacao(doc)
+        quando = f" (publicada em {data:%d/%m/%Y})" if data else ""
+        partes.append(f"[{titulo}]{quando}\n{doc.page_content}")
     contexto = "\n\n".join(partes)
     return {"contexto": contexto}
 
@@ -483,10 +571,12 @@ def no_gerar_resposta(estado: EstadoRAG):
         "Você é o Assistente RAG News, uma Inteligência Artificial especializada em análise de notícias, "
         "desenvolvido como um projeto universitário de IA Generativa.\n\n"
         "Sua missão é ler as fontes jornalísticas e entregar respostas precisas.\n"
+        "Data de hoje (UTC): {hoje}.\n"
         "Regras Absolutas:\n"
         "1. Baseie sua resposta EXCLUSIVAMENTE no contexto fornecido.\n"
-        "2. Se a informação não estiver no contexto, diga claramente: 'Não encontrei informações suficientes nas notícias de hoje para responder a isso.' Jamais invente dados.\n"
-        "3. Responda em Português do Brasil (PT-BR). Se a notícia for sobre um assunto leve e descontraído (ex: curiosidades, entretenimento), sinta-se à vontade para fazer uma piada rápida e inteligente no final da resposta. Se for um assunto sério (tragédias, política pesada), mantenha a postura profissional e neutra.\n\n"
+        "2. Se a informação não estiver no contexto, diga claramente: 'Não encontrei informações suficientes nas notícias disponíveis para responder a isso.' Jamais invente dados.\n"
+        "3. Responda em Português do Brasil (PT-BR). Se a notícia for sobre um assunto leve e descontraído (ex: curiosidades, entretenimento), sinta-se à vontade para fazer uma piada rápida e inteligente no final da resposta. Se for um assunto sério (tragédias, política pesada), mantenha a postura profissional e neutra.\n"
+        "4. Cada fonte traz a data de publicação. Se a pergunta for sobre um período (hoje, ontem, esta semana, últimas notícias), use as datas: diga de quando são as notícias e avise se nenhuma for do período perguntado, em vez de apresentá-las como atuais.\n\n"
         "Contexto:\n{contexto}\n\nPergunta: {pergunta}\n\nResposta:"
     )
     llm = ChatGroq(
@@ -496,11 +586,15 @@ def no_gerar_resposta(estado: EstadoRAG):
         max_tokens=GROQ_MAX_TOKENS,
     )
     chain = prompt | llm | StrOutputParser()
-    resposta = chain.invoke({"contexto": estado["contexto"], "pergunta": estado["pergunta"]})
+    resposta = chain.invoke({
+        "contexto": estado["contexto"],
+        "pergunta": estado["pergunta"],
+        "hoje": f"{datetime.now(timezone.utc):%d/%m/%Y}",
+    })
     return {"resposta": resposta}
 
 def no_sem_evidencia(estado: EstadoRAG):
-    return {"resposta": "Não encontrei essa informação nas notícias de hoje.", "documentos_recuperados": []}
+    return {"resposta": "Não encontrei essa informação nas notícias disponíveis.", "documentos_recuperados": []}
 
 def decidir_evidencia(estado: EstadoRAG) -> Literal["com_evidencia", "sem_evidencia"]:
     # Threshold calibrado (0.05): Mantém a lógica condicional do LangGraph funcionando 
@@ -512,6 +606,7 @@ def decidir_evidencia(estado: EstadoRAG) -> Literal["com_evidencia", "sem_eviden
 grafo = StateGraph(EstadoRAG)
 grafo.add_node("traduzir", no_traduzir)
 grafo.add_node("recuperar", no_recuperar)
+grafo.add_node("filtrar", no_filtrar)
 grafo.add_node("personalizar", no_personalizar)
 grafo.add_node("montar_contexto", no_montar_contexto)
 grafo.add_node("gerar_resposta", no_gerar_resposta)
@@ -523,10 +618,11 @@ grafo.add_conditional_edges(
     "recuperar",
     decidir_evidencia,
     {
-        "com_evidencia": "personalizar",
+        "com_evidencia": "filtrar",
         "sem_evidencia": "sem_evidencia"
     }
 )
+grafo.add_edge("filtrar", "personalizar")
 grafo.add_edge("personalizar", "montar_contexto")
 grafo.add_edge("montar_contexto", "gerar_resposta")
 grafo.add_edge("gerar_resposta", END)

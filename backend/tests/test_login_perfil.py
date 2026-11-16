@@ -140,7 +140,7 @@ RESULTS = [D("politica", "p1", .40), D("mundo", "m1", .38), D("mundo", "m2", .37
 def test_chat_anonymous_unchanged():
     FakeVS.results = RESULTS; FakeVS.calls.clear()
     r = client.post("/chat", json={"question": "q"}).json()
-    assert FakeVS.calls == [5] and r["personalizado"] is False
+    assert FakeVS.calls == [15] and r["personalizado"] is False
     assert r["sources"] == ["p1", "m1", "m2", "n1", "c1"]
 
 def test_chat_personalized_boosts_sports():
@@ -178,6 +178,76 @@ def test_boost_does_not_bypass_evidence_threshold():
     r = client.post("/chat", headers=H(token("fan")), json={"question": "q"}).json()
     assert r["sources"] == [] and "Não encontrei" in r["answer"]
 
+
+# ── filtro por notícia e data ───────────────────────────────────────────────
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+
+def DP(src, s, dias_atras=None, title="t", cat="mundo"):
+    """Documento com data de publicação no formato do RSS."""
+    meta = {"category": cat, "source": src, "title": title}
+    if dias_atras is not None:
+        meta["published"] = format_datetime(datetime.now(timezone.utc) - timedelta(days=dias_atras), usegmt=True)
+    return (Document(page_content=f"{title} news", metadata=meta), s)
+
+def test_weak_news_dropped_from_context():
+    # .20 < 75% de .40: sai, mesmo havendo vaga no top 5
+    FakeVS.results = [DP("forte", .40), DP("ok", .31), DP("fraca", .20)]
+    assert client.post("/chat", json={"question": "q"}).json()["sources"] == ["forte", "ok"]
+
+def test_promo_items_never_used():
+    FakeVS.results = [DP("promo", .50, title="Download now"), DP("noticia", .40)]
+    assert client.post("/chat", json={"question": "q"}).json()["sources"] == ["noticia"]
+
+def test_promo_item_does_not_count_as_evidence():
+    FakeVS.results = [DP("promo", .50, title=" Find out more here "), DP("ruido", .01)]
+    r = client.post("/chat", json={"question": "q"}).json()
+    assert r["sources"] == [] and "Não encontrei" in r["answer"]
+
+@pytest.mark.parametrize("q,esperado", [
+    ("o que aconteceu hoje?", True), ("últimas notícias de futebol", True),
+    ("novidades desta semana", True), ("o que rolou nesta semana?", True),
+    ("what happened today?", True), ("latest news", True),
+    ("quem é o técnico da Inglaterra?", False), ("notícias de tecnologia", False),
+])
+def test_temporal_question_detection(q, esperado):
+    assert main._pergunta_temporal(q) is esperado
+
+def test_temporal_question_prefers_recent_news():
+    FakeVS.results = [DP("antiga", .40, dias_atras=200), DP("recente", .36, dias_atras=0)]
+    r = client.post("/chat", json={"question": "o que aconteceu hoje?"}).json()
+    assert r["sources"] == ["recente", "antiga"]
+
+def test_non_temporal_question_keeps_relevance_order():
+    FakeVS.results = [DP("antiga", .40, dias_atras=200), DP("recente", .36, dias_atras=0)]
+    r = client.post("/chat", json={"question": "fale sobre o assunto"}).json()
+    assert r["sources"] == ["antiga", "recente"]
+
+def test_recency_does_not_bring_back_weak_news():
+    # notícia de hoje, mas fora do assunto (.20 < 75% de .40): continua fora
+    FakeVS.results = [DP("antiga", .40, dias_atras=200), DP("hoje_fraca", .20, dias_atras=0)]
+    r = client.post("/chat", json={"question": "o que aconteceu hoje?"}).json()
+    assert r["sources"] == ["antiga"]
+
+def test_context_has_publication_date_and_prompt_has_today(monkeypatch):
+    seen = []
+    from langchain_core.runnables import RunnableLambda
+    def capture(prompt_value):
+        seen.append(prompt_value.to_string()); return "ok"
+    monkeypatch.setattr(main, "ChatGroq", lambda **kw: RunnableLambda(capture))
+    monkeypatch.setattr(main, "TRANSLATE_MODEL", "")
+    doc = (Document(page_content="x", metadata={"source": "s", "title": "T",
+                                                  "published": "Sun, 15 Nov 2026 23:52:43 GMT"}), .4)
+    FakeVS.results = [doc]
+    client.post("/chat", json={"question": "q"})
+    assert "[T] (publicada em 15/11/2026)" in seen[0]
+    assert f"Data de hoje (UTC): {datetime.now(timezone.utc):%d/%m/%Y}" in seen[0]
+
+def test_missing_or_bad_date_is_tolerated():
+    FakeVS.results = [DP("sem_data", .40), (Document(page_content="x", metadata={"source": "ruim", "published": "ontem"}), .39)]
+    r = client.post("/chat", json={"question": "últimas notícias"})
+    assert r.status_code == 200 and r.json()["sources"] == ["sem_data", "ruim"]
+
 def test_chat_with_expired_token_is_401():
     assert client.post("/chat", headers=H(token(exp=1)), json={"question": "q"}).status_code == 401
 
@@ -200,6 +270,15 @@ def test_fetch_tags_category_and_dedups_across_feeds(monkeypatch):
         [("u_fut", "futebol"), ("u_sport", "esportes"), ("u_old", "geral")], existing_sources={"l3"})
     assert [(m["source"], m["category"]) for m in metas] == [("l1", "futebol"), ("l2", "esportes")]
     assert n == 2 and skipped == 2
+
+def test_ingest_skips_promo_items(monkeypatch):
+    class F(dict):
+        __getattr__ = dict.get
+    entries = [F(title="Download now", summary="app", link="promo", published=""),
+               F(title="Real news", summary="s", link="l1", published="")]
+    monkeypatch.setattr(main.feedparser, "parse", lambda url: F(bozo=False, entries=entries))
+    _, metas, n, _ = main._fetch_and_chunk_rss([("u", "geral")])
+    assert [m["source"] for m in metas] == ["l1"] and n == 1
 
 
 # ── limites do Groq ─────────────────────────────────────────────────────────

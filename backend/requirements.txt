@@ -24,3 +24,15 @@ feedparser>=6.0.11
 
 # Pydantic (FastAPI dependency)
 pydantic>=2.8.0
+pydantic-settings>=2.2.0
+
+# Database ORM
+sqlalchemy>=2.0.0
+
+# Auth & HTTP
+PyJWT>=2.8.0
+google-auth>=2.29.0
+httpx>=0.27.0
+
+# HTML Scraping
+beautifulsoup4>=4.12.0

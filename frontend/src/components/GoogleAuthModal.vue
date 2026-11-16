@@ -72,57 +72,63 @@
               Entre com sua conta Google para acessar o chat de notícias, salvar artigos, cadastrar fontes RSS ou tópicos personalizados e manter seu histórico de conversas.
             </p>
 
-            <!-- Botão oficial Google Identity Services -->
-            <div class="gsi-box">
-              <div v-if="loadingConfig" class="muted-hint">
-                Carregando configuração do Google OAuth...
-              </div>
-              <div v-else-if="activeClientId" class="gsi-btn-holder">
-                <div ref="googleBtnRef" class="gsi-target" />
-                <p v-if="!gsiReady" class="muted-hint">Carregando botão do Google...</p>
-              </div>
-              <div v-else class="client-id-missing">
-                <p class="muted-hint">
-                  Nenhum <code>GOOGLE_CLIENT_ID</code> foi encontrado no backend ou em <code>VITE_GOOGLE_CLIENT_ID</code>. Informe o Client ID abaixo ou utilize o login com token manual.
-                </p>
-              </div>
-
-              <div class="client-id-config">
-                <button type="button" class="link-toggle" @click="showClientConfig = !showClientConfig">
-                  {{ showClientConfig ? "Ocultar Client ID" : (activeClientId ? "Alterar Google Client ID" : "Configurar Google Client ID") }}
-                </button>
-                <div v-if="showClientConfig" class="inline-form">
-                  <input
-                    v-model="clientIdDraft"
-                    type="text"
-                    class="text-input"
-                    placeholder="xxxx.apps.googleusercontent.com"
+            <div class="google-actions-box">
+              <!-- Botão principal sempre visível -->
+              <button
+                type="button"
+                class="google-cta-btn"
+                :disabled="isSubmitting || loadingConfig"
+                @click="handleGoogleButtonClick"
+              >
+                <svg class="google-g-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
                   />
-                  <button type="button" class="secondary-btn" @click="saveClientId">
-                    Aplicar
-                  </button>
-                </div>
-              </div>
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                  />
+                </svg>
+                <span>
+                  {{
+                    loadingConfig
+                      ? "Carregando Google OAuth..."
+                      : isSubmitting
+                        ? "Conectando ao Google..."
+                        : "Continuar com o Google"
+                  }}
+                </span>
+              </button>
+
+              <!-- Slot oficial GSI (acesso rápido / One Tap fallback) -->
+              <div v-if="activeClientId" ref="googleBtnRef" class="gsi-slot" />
             </div>
 
-            <!-- Fallback para testes com token manual -->
-            <div class="dev-token-section">
-              <button type="button" class="link-toggle" @click="showManualToken = !showManualToken">
-                {{ showManualToken ? "▾ Ocultar login com token manual" : "▸ Modo desenvolvedor: colar Google ID/Access Token" }}
-              </button>
-              <form v-if="showManualToken" class="manual-form" @submit.prevent="submitManualToken">
-                <textarea
-                  v-model="manualToken"
-                  rows="3"
+            <!-- Campo simples exibido apenas quando o usuário clica sem GOOGLE_CLIENT_ID configurado -->
+            <form v-if="showClientConfig" class="client-id-box" @submit.prevent="saveClientIdAndLogin">
+              <label class="field-label">
+                <span>Informe o Google Client ID para continuar</span>
+                <input
+                  v-model="clientIdDraft"
+                  type="text"
+                  required
                   class="text-input"
-                  placeholder="Cole aqui um Google id_token (JWT) ou access_token..."
-                  :disabled="isSubmitting"
+                  placeholder="seu-client-id.apps.googleusercontent.com"
                 />
-                <button type="submit" class="primary-btn" :disabled="!manualToken.trim() || isSubmitting">
-                  {{ isSubmitting ? "Autenticando..." : "Autenticar com Token" }}
-                </button>
-              </form>
-            </div>
+              </label>
+              <button type="submit" class="primary-btn" :disabled="!clientIdDraft.trim() || isSubmitting">
+                Confirmar e abrir Google
+              </button>
+            </form>
           </div>
 
           <!-- Estado AUTENTICADO -->
@@ -188,7 +194,6 @@ const props = defineProps({
 const emit = defineEmits(["close", "authenticated", "updated-user", "logout", "toggle-theme"]);
 
 const googleBtnRef = ref(null);
-const gsiReady = ref(false);
 const loadingConfig = ref(false);
 const isSubmitting = ref(false);
 const errorMsg = ref("");
@@ -202,13 +207,11 @@ const activeClientId = ref(
 const clientIdDraft = ref(activeClientId.value);
 const showClientConfig = ref(false);
 
-const showManualToken = ref(false);
-const manualToken = ref("");
-
 const profileName = ref("");
 const profilePicture = ref("");
 
 let gsiPollTimer = null;
+let oneTapTriggeredForSession = false;
 
 const userInitial = computed(() => {
   const source = props.user?.name || props.user?.email || "U";
@@ -226,7 +229,7 @@ async function ensureClientIdLoaded() {
       clientIdDraft.value = backendClientId;
     }
   } catch {
-    // Silencioso: usuário ainda pode informar Client ID manualmente ou usar token
+    // Caso o backend ainda não tenha GOOGLE_CLIENT_ID, o usuário poderá informar ao clicar no botão
   } finally {
     loadingConfig.value = false;
   }
@@ -250,8 +253,9 @@ async function syncStateOnOpen() {
 
   await ensureClientIdLoaded();
   if (activeClientId.value) {
+    showClientConfig.value = false;
     await nextTick();
-    initGoogleButton();
+    initGoogleOneTapAndButton();
   }
 }
 
@@ -279,38 +283,135 @@ function stopGsiPoll() {
   }
 }
 
-function renderGsiButton() {
-  if (!window.google?.accounts?.id || !googleBtnRef.value || !activeClientId.value) {
+function setupGoogleIdServices() {
+  if (!window.google?.accounts?.id || !activeClientId.value) {
     return false;
   }
-  googleBtnRef.value.innerHTML = "";
+
   window.google.accounts.id.initialize({
     client_id: activeClientId.value,
     callback: handleGoogleCredentialResponse,
+    auto_select: true,
   });
-  window.google.accounts.id.renderButton(googleBtnRef.value, {
-    theme: props.isDarkMode ? "filled_black" : "outline",
-    size: "large",
-    text: "continue_with",
-    shape: "rectangular",
-    width: 320,
-  });
-  gsiReady.value = true;
+
+  if (googleBtnRef.value) {
+    googleBtnRef.value.innerHTML = "";
+    window.google.accounts.id.renderButton(googleBtnRef.value, {
+      theme: props.isDarkMode ? "filled_black" : "outline",
+      size: "medium",
+      text: "continue_with",
+      shape: "rectangular",
+      width: 320,
+    });
+  }
+
+  if (!oneTapTriggeredForSession) {
+    oneTapTriggeredForSession = true;
+    try {
+      window.google.accounts.id.prompt();
+    } catch {
+      // Ignora caso o navegador bloqueie o One Tap automático
+    }
+  }
+
   return true;
 }
 
-function initGoogleButton() {
+function initGoogleOneTapAndButton() {
   stopGsiPoll();
-  gsiReady.value = false;
-  if (renderGsiButton()) return;
+  if (setupGoogleIdServices()) return;
 
   let attempts = 0;
   gsiPollTimer = setInterval(() => {
     attempts += 1;
-    if (renderGsiButton() || attempts > 30) {
+    if (setupGoogleIdServices() || attempts > 30) {
       stopGsiPoll();
     }
   }, 200);
+}
+
+function waitForGoogleOAuth2(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (window.google?.accounts?.oauth2) {
+      resolve(true);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (window.google?.accounts?.oauth2) {
+        clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, 150);
+  });
+}
+
+async function handleGoogleButtonClick() {
+  errorMsg.value = "";
+  if (!activeClientId.value) {
+    await ensureClientIdLoaded();
+  }
+
+  if (!activeClientId.value) {
+    showClientConfig.value = true;
+    errorMsg.value =
+      "Configure o GOOGLE_CLIENT_ID no backend/.env ou informe abaixo para abrir o login do Google.";
+    return;
+  }
+
+  await openGoogleOAuthPopup();
+}
+
+async function openGoogleOAuthPopup() {
+  isSubmitting.value = true;
+  errorMsg.value = "";
+
+  const loaded = await waitForGoogleOAuth2();
+  if (!loaded) {
+    isSubmitting.value = false;
+    errorMsg.value =
+      "Não foi possível carregar o script do Google Identity Services. Verifique sua conexão com a internet.";
+    return;
+  }
+
+  try {
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: activeClientId.value,
+      scope: "openid email profile",
+      callback: async (tokenResponse) => {
+        if (tokenResponse?.error || !tokenResponse?.access_token) {
+          isSubmitting.value = false;
+          errorMsg.value =
+            tokenResponse?.error_description || "Autenticação com o Google não foi concluída.";
+          return;
+        }
+        await performGoogleLogin(tokenResponse.access_token);
+      },
+      error_callback: () => {
+        isSubmitting.value = false;
+        errorMsg.value = "Janela de login do Google fechada ou bloqueada pelo navegador.";
+      },
+    });
+    tokenClient.requestAccessToken({ prompt: "select_account" });
+  } catch (err) {
+    isSubmitting.value = false;
+    errorMsg.value = err?.message || "Erro ao iniciar login com o Google.";
+  }
+}
+
+async function saveClientIdAndLogin() {
+  const clean = clientIdDraft.value.trim();
+  if (!clean) return;
+  activeClientId.value = clean;
+  localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clean);
+  showClientConfig.value = false;
+  oneTapTriggeredForSession = false;
+  await nextTick();
+  initGoogleOneTapAndButton();
+  await openGoogleOAuthPopup();
 }
 
 async function handleGoogleCredentialResponse(response) {
@@ -327,30 +428,13 @@ async function performGoogleLogin(token) {
   successMsg.value = "";
   try {
     const data = await authApi.loginWithGoogle(token);
-    manualToken.value = "";
     emit("authenticated", data);
   } catch (err) {
-    errorMsg.value = err.response?.data?.detail || err.message || "Falha ao autenticar com o Google.";
+    errorMsg.value =
+      err.response?.data?.detail || err.message || "Falha ao autenticar com o Google.";
   } finally {
     isSubmitting.value = false;
   }
-}
-
-function saveClientId() {
-  const clean = clientIdDraft.value.trim();
-  activeClientId.value = clean;
-  if (clean) {
-    localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clean);
-    nextTick(() => initGoogleButton());
-  } else {
-    localStorage.removeItem(GOOGLE_CLIENT_ID_KEY);
-    gsiReady.value = false;
-  }
-}
-
-async function submitManualToken() {
-  if (!manualToken.value.trim()) return;
-  await performGoogleLogin(manualToken.value.trim());
 }
 
 async function saveProfile() {
@@ -372,6 +456,7 @@ async function saveProfile() {
 }
 
 function handleLogout() {
+  oneTapTriggeredForSession = false;
   emit("logout");
   emit("close");
 }
@@ -540,79 +625,72 @@ function handleLogout() {
 }
 
 .auth-description {
-  margin: 0 0 1rem;
+  margin: 0 0 1.1rem;
   font-size: 0.87rem;
   line-height: 1.55;
   color: var(--color-text-secondary);
 }
 
-.gsi-box {
+.google-actions-box {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 0.85rem;
+}
+
+.google-cta-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 0.75rem;
-  padding: 1rem;
-  border: 1px dashed var(--color-border);
+  width: 100%;
+  padding: 0.78rem 1.1rem;
   border-radius: 10px;
-  background: var(--color-bg-secondary);
-}
-
-.gsi-btn-holder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-height: 44px;
-}
-
-.muted-hint {
-  margin: 0;
-  font-size: 0.76rem;
-  color: var(--color-text-muted);
-  text-align: center;
-  line-height: 1.45;
-}
-
-.client-id-config {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.link-toggle {
-  background: transparent;
-  border: none;
-  color: var(--color-accent-light);
-  font-size: 0.76rem;
+  border: 1px solid #dadce0;
+  background: #ffffff;
+  color: #1f1f1f;
+  font-size: 0.92rem;
+  font-weight: 600;
+  font-family: "Inter", sans-serif;
   cursor: pointer;
-  padding: 0.15rem 0;
-  text-align: left;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.link-toggle:hover {
-  text-decoration: underline;
+.google-cta-btn:hover:not(:disabled) {
+  background: #f8f9fa;
 }
 
-.inline-form {
+.google-cta-btn:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.google-cta-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.google-g-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.gsi-slot {
   display: flex;
-  gap: 0.45rem;
-  width: 100%;
+  justify-content: center;
+  min-height: 0;
 }
 
-.dev-token-section {
+.client-id-box {
   margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--color-border);
+  padding: 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-}
-
-.manual-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.65rem;
 }
 
 .text-input {
@@ -719,17 +797,6 @@ function handleLogout() {
 .primary-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.secondary-btn {
-  background: var(--color-bg-card);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  padding: 0.5rem 0.85rem;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  cursor: pointer;
-  white-space: nowrap;
 }
 
 .danger-outline-btn {

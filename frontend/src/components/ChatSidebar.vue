@@ -12,7 +12,6 @@
       </div>
       <div class="brand-text">
         <span class="brand-title">RAG News</span>
-        <span class="brand-sub">OpenRouter · PGVector</span>
       </div>
     </div>
 

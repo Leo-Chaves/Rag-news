@@ -2,6 +2,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.modules.rag_chat.graph.nodes import (
     decidir_evidencia,
+    no_filtrar,
     no_gerar_resposta,
     no_montar_contexto,
     no_recuperar,
@@ -11,16 +12,23 @@ from app.modules.rag_chat.graph.state import EstadoRAG
 
 
 def build_rag_graph():
-    """Constrói e compila o grafo StateGraph do pipeline RAG."""
+    """
+    Constrói e compila o grafo StateGraph do pipeline RAG:
+
+    START → recuperar → filtrar → (evidência?) ─sim→ montar_contexto → gerar_resposta → END
+                                               └não→ sem_evidencia → END
+    """
     grafo = StateGraph(EstadoRAG)
     grafo.add_node("recuperar", no_recuperar)
+    grafo.add_node("filtrar", no_filtrar)
     grafo.add_node("montar_contexto", no_montar_contexto)
     grafo.add_node("gerar_resposta", no_gerar_resposta)
     grafo.add_node("sem_evidencia", no_sem_evidencia)
 
     grafo.add_edge(START, "recuperar")
+    grafo.add_edge("recuperar", "filtrar")
     grafo.add_conditional_edges(
-        "recuperar",
+        "filtrar",
         decidir_evidencia,
         {
             "com_evidencia": "montar_contexto",
@@ -35,4 +43,3 @@ def build_rag_graph():
 
 
 grafo_rag = build_rag_graph()
-

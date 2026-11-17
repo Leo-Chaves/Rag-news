@@ -8,8 +8,10 @@ services:
       POSTGRES_USER: ${DB_USER:-ragnews}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-SenhaMegaBlaster}
       POSTGRES_DB: ${DB_NAME:-ragnews}
+    # Só a própria máquina acessa o Postgres (o backend usa a rede interna do
+    # compose, host "db"). "5432:5432" deixaria o banco aberto para a rede.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

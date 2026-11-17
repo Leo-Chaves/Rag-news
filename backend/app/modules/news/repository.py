@@ -183,12 +183,18 @@ class NewsRepository:
                             (settings.COLLECTION_NAME, scope, user_id),
                         )
                     return {row[0] for row in cur.fetchall() if row[0]}
-        except Exception as exc:
-            logger.warning(
-                "Não foi possível consultar fontes existentes (tabela pode ainda não existir): %s",
-                exc,
-            )
+        except psycopg.errors.UndefinedTable:
+            # Primeira ingestão: o PGVector ainda não criou as tabelas.
+            logger.info("Tabelas do PGVector ainda não existem; nada a deduplicar.")
             return set()
+        except Exception as exc:
+            # Devolver set() aqui faria a ingestão regravar todas as notícias
+            # (duplicando o acervo e gastando a cota de embeddings). Melhor abortar.
+            logger.error("Falha ao consultar fontes existentes para deduplicação: %s", exc)
+            raise ExternalServiceError(
+                "Não foi possível verificar as notícias já indexadas; ingestão cancelada "
+                "para evitar duplicatas. Tente novamente."
+            ) from exc
 
     @staticmethod
     def delete_embeddings_by_metadata(

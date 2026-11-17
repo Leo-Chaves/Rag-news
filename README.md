@@ -68,9 +68,37 @@ uvicorn main:app --reload --port 8000
 | Método | Rota           | Descrição                                                                       |
 |--------|----------------|---------------------------------------------------------------------------------|
 | GET    | `/`            | Health check, modelos ativos e arquitetura                                      |
-| POST   | `/ingest`      | Busca notícias da BBC, gera embeddings e salva no PGVector (atalho legado)      |
-| POST   | `/reset`       | Reseta tabelas do PGVector no Supabase (usar se trocar o modelo de embeddings) |
+| POST   | `/ingest`      | **Exige login.** Atalho legado de `/news/ingest`                                |
+| POST   | `/reset`       | **Exige `X-Admin-Key`** igual a `ADMIN_API_KEY` (sem ela configurada, a rota fica desligada). Apaga as tabelas do PGVector, inclusive as notícias salvas pelos usuários; usar só ao trocar o modelo de embeddings |
 | POST   | `/chat`        | Pergunta ao RAG (`scope`: `global`, `saved`, `custom`, `personal_all`)         |
+
+Exemplo de reset (só o administrador):
+```bash
+curl -X POST http://localhost:8000/reset -H "X-Admin-Key: <ADMIN_API_KEY>"
+```
+
+#### Como o chat escolhe as notícias (grafo LangGraph)
+```
+START → recuperar → filtrar → (evidência?) ─sim→ montar_contexto → gerar_resposta → END
+                                           └não→ sem_evidencia → END
+```
+- **recuperar** busca `3 × top_k` candidatos no escopo pedido e descarta os itens
+  promocionais fixos da BBC ("Download now", "Find out more here"), que também não
+  são mais gravados na ingestão.
+- **filtrar** descarta as notícias com score abaixo de `RELEVANCE_MIN_RATIO`
+  (padrão 0.75) × o melhor resultado: o chat pode responder com 2 fontes boas em vez
+  de 5 com assuntos misturados.
+- Perguntas sobre período recente ("últimas", "esta semana", "latest"...) ganham um
+  bônus de recência: `RECENCY_BOOST × 0.5^(idade em dias / RECENCY_HALF_LIFE_DAYS)`,
+  só para notícias que já passaram no filtro de relevância.
+- "**hoje**" e "**ontem**" (escopo global) pedem um dia exato: só entram notícias
+  publicadas nesse dia, no horário de Brasília (a busca olha `10 × top_k`
+  candidatos). Sem nenhuma, o chat avisa que não há notícias do dia, em vez de
+  apresentar notícias antigas. "Hoje em dia" não conta.
+- O contexto leva a data de publicação de cada notícia e o prompt, a data de hoje,
+  para o modelo avisar quando as notícias não forem do período perguntado.
+- `RELEVANCE_MIN_RATIO` foi calibrado com o modelo de embeddings antigo (MiniLM);
+  com o nemotron vale conferir com perguntas reais e ajustar no `.env`.
 
 #### Autenticação & Usuários (`/auth`, `/users`)
 | Método | Rota             | Descrição                                                                 |

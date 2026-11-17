@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import urllib.parse
 from pathlib import Path
 from typing import List
@@ -8,7 +9,12 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DEV_JWT_SECRET = "dev-insecure-jwt-secret-change-in-production"
+# Valores que já foram publicados no repositório: quem os conhece forja tokens.
+_PUBLIC_JWT_SECRETS = {
+    "dev-insecure-jwt-secret-change-in-production",
+    "gere-uma-chave-secreta-forte-aqui",
+}
+_MIN_JWT_SECRET_LENGTH = 32
 
 
 def _load_dotenv_safe() -> None:
@@ -68,6 +74,40 @@ def _parse_int_env(name: str, default: int) -> int:
     except ValueError:
         logger.warning("Variável %s='%s' inválida; usando padrão %d.", name, raw, default)
         return default
+
+
+def _parse_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Variável %s='%s' inválida; usando padrão %s.", name, raw, default)
+        return default
+
+
+def _resolve_jwt_secret() -> str:
+    """
+    Usa JWT_SECRET_KEY do ambiente. Se estiver vazia, for um valor já publicado
+    no repositório ou for curta demais, gera uma chave aleatória por processo:
+    ninguém consegue forjar tokens, mas os logins caem a cada reinício.
+    """
+    raw = os.getenv("JWT_SECRET_KEY", "").strip()
+    if raw and raw not in _PUBLIC_JWT_SECRETS and len(raw) >= _MIN_JWT_SECRET_LENGTH:
+        return raw
+
+    motivo = (
+        "não configurada" if not raw
+        else "é um valor de exemplo público" if raw in _PUBLIC_JWT_SECRETS
+        else f"tem menos de {_MIN_JWT_SECRET_LENGTH} caracteres"
+    )
+    logger.warning(
+        "JWT_SECRET_KEY %s; usando chave aleatória temporária (logins expiram a cada "
+        "reinício). Gere uma com: python -c \"import secrets; print(secrets.token_urlsafe(48))\"",
+        motivo,
+    )
+    return secrets.token_urlsafe(48)
 
 
 _load_dotenv_safe()
@@ -170,15 +210,18 @@ class Settings:
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256").strip() or "HS256"
     JWT_EXPIRE_MINUTES: int = _parse_int_env("JWT_EXPIRE_MINUTES", 1440)
 
+    # Chave exigida no cabeçalho X-Admin-Key do POST /reset. Vazia = rota desligada.
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "").strip()
+
+    # --- Busca do chat (nó "filtrar") ---
+    # Só vai para o contexto a notícia com score >= esta fração do melhor.
+    RELEVANCE_MIN_RATIO: float = _parse_float_env("RELEVANCE_MIN_RATIO", 0.75)
+    # Perguntas sobre período recente: bônus RECENCY_BOOST x 0.5^(idade/meia-vida).
+    RECENCY_BOOST: float = _parse_float_env("RECENCY_BOOST", 0.1)
+    RECENCY_HALF_LIFE_DAYS: float = _parse_float_env("RECENCY_HALF_LIFE_DAYS", 1.0)
+
     def __init__(self) -> None:
-        raw_secret = os.getenv("JWT_SECRET_KEY", "").strip()
-        if not raw_secret:
-            logger.warning(
-                "JWT_SECRET_KEY não configurada no .env; usando chave padrão insegura apenas para desenvolvimento."
-            )
-            self.JWT_SECRET_KEY = _DEFAULT_DEV_JWT_SECRET
-        else:
-            self.JWT_SECRET_KEY = raw_secret
+        self.JWT_SECRET_KEY = _resolve_jwt_secret()
 
     @property
     def psycopg_conn_str(self) -> str:

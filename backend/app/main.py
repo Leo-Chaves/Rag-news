@@ -1,12 +1,13 @@
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import init_db
-from app.core.exceptions import register_exception_handlers
+from app.core.exceptions import ForbiddenError, register_exception_handlers
 from app.modules.auth.router import router as auth_router
 from app.modules.news.repository import NewsRepository
 from app.modules.news.router import router as news_router
@@ -14,6 +15,8 @@ from app.modules.news.schemas import GlobalIngestResponse
 from app.modules.news.service import NewsService
 from app.modules.rag_chat.router import router as rag_chat_router
 from app.modules.users.router import router as users_router
+from app.shared.contracts import CurrentUserDTO
+from app.shared.dependencies import get_current_user
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,13 +76,25 @@ def create_app() -> FastAPI:
         }
 
     @application.post("/ingest", response_model=GlobalIngestResponse, tags=["Ingestion"])
-    def ingest_legacy() -> GlobalIngestResponse:
-        """Endpoint legado que delega a ingestão global da BBC para o módulo news."""
+    def ingest_legacy(
+        _current_user: CurrentUserDTO = Depends(get_current_user),
+    ) -> GlobalIngestResponse:
+        """Endpoint legado (exige login, como /news/ingest) que delega a ingestão global."""
         return NewsService.ingest_global_bbc_feeds()
 
     @application.post("/reset", tags=["Admin"])
-    def reset_database():
-        """Endpoint legado que reseta as tabelas vetoriais do PGVector."""
+    def reset_database(x_admin_key: str | None = Header(default=None)):
+        """
+        Apaga as tabelas vetoriais do PGVector (todas as notícias, inclusive as
+        salvas pelos usuários). Exige o cabeçalho X-Admin-Key igual a ADMIN_API_KEY;
+        sem ADMIN_API_KEY configurada, a rota fica desligada.
+        """
+        if not settings.ADMIN_API_KEY:
+            raise ForbiddenError("Rota desativada: defina ADMIN_API_KEY no .env para usá-la.")
+        if not x_admin_key or not hmac.compare_digest(
+            x_admin_key.encode("utf-8"), settings.ADMIN_API_KEY.encode("utf-8")
+        ):
+            raise ForbiddenError("Chave de administrador inválida.")
         NewsRepository.reset_pgvector_tables()
         return {
             "message": (

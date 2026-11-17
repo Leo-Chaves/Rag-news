@@ -9,6 +9,7 @@ import httpx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.exceptions import ExternalServiceError, ValidationError
+from app.shared.promos import is_promotional_title
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,8 @@ def fetch_rss_feed_entries(
             seen_links.add(link)
 
             title = _strip_html(str(entry.get("title", "")))
+            if is_promotional_title(title):
+                continue
             summary = _strip_html(str(entry.get("summary", "") or entry.get("description", "")))
             published = str(entry.get("published", "")).strip()
 
@@ -206,6 +209,9 @@ def fetch_and_chunk_rss(
             summary = _strip_html(str(entry.get("summary", "") or entry.get("description", "")))
             link = str(entry.get("link", url)).strip() or url
             published = str(entry.get("published", "")).strip()
+
+            if is_promotional_title(title):
+                continue
 
             if not _matches_topic(title, summary, topic_keywords):
                 continue

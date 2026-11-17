@@ -63,6 +63,12 @@ def init_db() -> None:
     import app.modules.users.models  # noqa: F401
 
     engine = get_engine()
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+    except Exception as exc:
+        logger.warning("Não foi possível garantir a extensão pgvector automaticamente: %s", exc)
+
     Base.metadata.create_all(bind=engine)
 
     # Migração idempotente caso a tabela users tenha sido criada na versão anterior (Google OAuth)

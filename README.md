@@ -112,8 +112,33 @@ npm run dev
 # Acesse: http://localhost:5173
 ```
 
-> O Vite está configurado com proxy: chamadas para `/chat` e `/ingest`
+> O Vite está configurado com proxy: chamadas para `/chat`, `/ingest`, `/reset`, `/auth`, `/users` e `/news`
 > são redirecionadas automaticamente para `http://localhost:8000`.
+
+---
+
+## 🐳 Docker Compose (Local & Raspberry Pi)
+
+A forma mais simples de subir o projeto completo (PostgreSQL com **pgvector**, **Backend FastAPI** e **Frontend Nginx**) tanto localmente quanto em um **Raspberry Pi (ARM64)**:
+
+### Subir toda a stack com Docker
+```bash
+# 1. Configure o ambiente do backend
+cp backend/.env.example backend/.env
+# Edite backend/.env com sua OPENROUTER_API_KEY, credenciais do banco e JWT_SECRET_KEY
+
+# 2. Suba banco + backend + frontend
+docker compose up -d --build
+```
+- Frontend: `http://localhost:5173` (ou `http://<IP_DO_RASPBERRY>:5173` na rede local)
+- API / Docs: `http://localhost:8000/docs`
+
+### Modo Dev Híbrido (apenas o banco no Docker)
+Se preferir rodar backend (`uvicorn`) e frontend (`npm run dev`) diretamente no terminal sem instalar o `pgvector` no sistema operacional:
+```bash
+docker compose up -d db
+```
+No `backend/.env`, utilize `DB_HOST=127.0.0.1` e `DB_SSLMODE=disable`.
 
 ---
 
@@ -136,7 +161,7 @@ npm run dev
 | Camada       | Tecnologia                                                   |
 |--------------|--------------------------------------------------------------|
 | LLM          | OpenRouter (`nvidia/nemotron-3.5-super-vl:free`)             |
-| Embeddings   | OpenRouter (`nvidia/llama-nemotron-embed-vl-1b-v2:free`)     |
+| Embeddings   | OpenRouter (`nvidia/nemotron-3.5-embed-1b:free`)             |
 | Vector DB    | PGVector via Supabase                                        |
 | Orquestração | LangChain + LangGraph                                        |
 | API          | FastAPI + Uvicorn                                            |

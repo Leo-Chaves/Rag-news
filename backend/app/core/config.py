@@ -51,8 +51,12 @@ def _build_database_url() -> str:
     if not host or not password:
         return ""
 
+    sslmode = os.getenv("DB_SSLMODE", "").strip()
+    if not sslmode:
+        sslmode = "disable" if host in ("127.0.0.1", "localhost", "db", "postgres") else "require"
+
     encoded_password = urllib.parse.quote(password, safe="")
-    return f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}?sslmode=require"
+    return f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}?sslmode={sslmode}"
 
 
 def _parse_int_env(name: str, default: int) -> int:
@@ -80,7 +84,7 @@ class Settings:
     OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free")
     OPENROUTER_EMBEDDING_MODEL: str = os.getenv(
         "OPENROUTER_EMBEDDING_MODEL",
-        "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+        "nvidia/nemotron-3.5-embed-1b:free",
     )
     COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "rag_news")
 
